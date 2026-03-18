@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RP Game Engine Prototype</title>
+    <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+    <div class="bg-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <aside>
+        <div class="logo">RP ENGINE</div>
+        <div class="nav-container">
+            <div class="nav-item active" data-view="character-view">Character Sheet</div>
+            <div class="nav-item" data-view="chat-view">Chat Terminal</div>
+            <div class="nav-item" data-view="editor-view">Profiles & Editor</div>
+            <div class="nav-item" data-view="settings-view">Settings</div>
+            <div class="nav-spacer"></div>
+            <div class="nav-item reset-btn" id="reset-chat-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><polyline points="23 20 23 14 17 14"></polyline><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path></svg>
+                New Chat
+            </div>
+        </div>
+    </aside>
+
+    <main>
+        <!-- Character View -->
+        <div class="card-container view-section" id="character-view">
+            <div class="party-sheet-grid" id="party-sheet-grid">
+                <div class="loading">Loading Character Data...</div>
+            </div>
+        </div>
+
+        <!-- Chat View -->
+        <div class="chat-container view-section hidden" id="chat-view">
+            <div class="chat-main">
+                <div class="chat-history" id="chat-history">
+                    <!-- Messages will be injected here -->
+                </div>
+                <div class="chat-input-area">
+                    <textarea id="chat-input" placeholder="メッセージを入力... (Enterで送信, Shift+Enterで改行)"></textarea>
+                    <button id="banter-btn" title="パーティメンバー同士の掛け合い">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    </button>
+                    <button id="send-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Editor View -->
+        <div class="editor-container view-section hidden" id="editor-view">
+            <div class="editor-grid">
+                <!-- User Profile -->
+                <div class="editor-panel">
+                    <h2>User Persona (主人公設定)</h2>
+                    <div class="form-group">
+                        <label>Your Avatar (アイコン画像)</label>
+                        <input type="file" id="user-avatar-upload" accept="image/png, image/jpeg, image/webp">
+                    </div>
+                    <div class="form-group">
+                        <label>Your Name</label>
+                        <input type="text" id="user-name" placeholder="User" value="User">
+                    </div>
+                    <div class="form-group">
+                        <label>Your Persona / Appearance</label>
+                        <textarea id="user-persona" rows="5" placeholder="あなたの外見、性格、背景などを入力します。AIがこれを見て反応を変えます。"></textarea>
+                    </div>
+                    <button id="save-user-btn" class="primary-btn">Save User Persona</button>
+                </div>
+
+                <!-- Character Editor (with integrated Lorebook per slot) -->
+                <div class="editor-panel">
+                    <h2>Character Editor (キャラクター編集)</h2>
+                    <div class="slot-tabs">
+                        <div class="slot-tab active" data-slot="0">Slot 1</div>
+                        <div class="slot-tab" data-slot="1">Slot 2</div>
+                        <div class="slot-tab" data-slot="2">Slot 3</div>
+                    </div>
+                    <div id="slot-avatar-preview" class="slot-avatar-preview"></div>
+                    <div class="form-group">
+                        <label>Character Avatar (キャラクター画像)</label>
+                        <input type="file" id="edit-char-avatar" accept="image/png, image/jpeg, image/webp">
+                    </div>
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="edit-char-name">
+                    </div>
+                    <div class="form-group">
+                        <label>Personality (カンマ区切り)</label>
+                        <input type="text" id="edit-char-personality">
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="edit-char-desc" rows="4"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Scenario</label>
+                        <textarea id="edit-char-scenario" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>First Message</label>
+                        <textarea id="edit-char-firstmes" rows="4"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Sample Dialogue (セリフ例)</label>
+                        <textarea id="edit-char-examples" rows="4"></textarea>
+                    </div>
+
+                    <!-- Lorebook (per-slot) -->
+                    <h3 class="sub-section-title">📖 Lorebook (世界観設定)</h3>
+                    <p class="hint">このスロットのキャラクターに関連する世界観設定。Keywordがチャットに出現するとAIに自動で注入されます。</p>
+                    <div id="lorebook-entries" class="lore-list">
+                        <!-- Entries dynamic injection -->
+                    </div>
+                    <button id="add-lore-btn" class="secondary-btn">+ Add New Entry</button>
+
+                    <!-- Common Lorebook (Global) -->
+                    <h3 class="sub-section-title">🌍 Common Lorebook (共通世界観設定)</h3>
+                    <p class="hint">全キャラクターに共通する世界観設定。どのキャラとの会話でも、Keywordが出現すると注入されます。</p>
+                    <div id="common-lorebook-entries" class="lore-list">
+                        <!-- Entries dynamic injection -->
+                    </div>
+                    <div class="flex-row">
+                        <button id="add-common-lore-btn" class="secondary-btn" style="flex: 2;">+ Add Common Lore Entry</button>
+                        <button id="save-common-lore-btn" class="primary-btn" style="flex: 1;">Save Global Lore</button>
+                    </div>
+
+                    <!-- Party Management -->
+                    <h3 class="sub-section-title">👥 Party Management (パーティ一括管理)</h3>
+                    <div class="flex-row" style="margin-top: 1rem;">
+                        <button id="export-party-btn" class="primary-btn">Export Entire Party</button>
+                        <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                            <input type="file" id="import-party-file" accept=".json" style="padding: 10px;">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 1.5rem;">
+                        <label>JSON Import (単体キャラ用)</label>
+                        <input type="file" id="import-char-file" accept=".json">
+                    </div>
+                    <div class="flex-row" style="margin-top: 1rem;">
+                        <button id="save-char-btn" class="primary-btn">Save Character & Lore</button>
+                        <button id="export-char-btn" class="secondary-btn">Export JSON</button>
+                    </div>
+                    <button id="clear-slot-btn" class="danger-btn" style="margin-top: 0.5rem;">🗑 Clear This Slot</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings View -->
+        <div class="settings-container view-section hidden" id="settings-view">
+            <div class="settings-panel">
+                <h2>API Settings</h2>
+                <div class="form-group">
+                    <label>API Endpoint (OpenAI Compatible)</label>
+                    <input type="text" id="api-url" placeholder="http://localhost:5001/v1/chat/completions" value="http://localhost:5001/v1/chat/completions">
+                    <div class="hint">Kobold.cppの場合は http://localhost:5001/v1/chat/completions (Ollamaの場合は11434など)を指定</div>
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="api-key" placeholder="ローカルの場合は空白または「none」でOK" value="none">
+                </div>
+                <div class="form-group">
+                    <label>Model Name</label>
+                    <input type="text" id="api-model" placeholder="local-model" value="local-model">
+                </div>
+                <div class="form-group">
+                    <label>Max Tokens</label>
+                    <input type="number" id="api-tokens" placeholder="1000" value="1000">
+                </div>
+                <button id="save-settings-btn" class="primary-btn">Save Settings</button>
+            </div>
+        </div>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>
