@@ -263,6 +263,96 @@ main {
 }
 
 /* Profiles & Editor View */
+/* Single-panel centered view (User Persona / Character Editor) */
+.single-panel-view {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 2rem;
+  width: 100%;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.hint-inline {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-weight: 400;
+  margin-left: 0.3rem;
+}
+
+/* Party Setup Grid */
+.party-set-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.party-set-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  transition: border-color 0.2s;
+}
+
+.party-set-card:hover {
+  border-color: var(--accent-color);
+}
+
+.psc-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-color);
+  opacity: 0.8;
+}
+
+.psc-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(0,0,0,0.2);
+  border: 2px solid rgba(255,255,255,0.08);
+}
+
+.psc-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  text-align: center;
+  line-height: 1.2;
+  min-height: 1.2em;
+}
+
+.psc-personality {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-align: center;
+  min-height: 1rem;
+}
+
+.psc-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.psc-btn {
+  font-size: 0.72rem !important;
+  padding: 0.3rem 0.6rem !important;
+  border-radius: 8px !important;
+  min-width: unset !important;
+}
+
+/* Legacy: kept for potential future use */
 .editor-container {
   max-width: 1400px;
   margin: 0 auto;
@@ -517,6 +607,15 @@ main {
   align-self: flex-start;
 }
 
+/* ナレーション（地の文・NPC発言）の専用スタイル */
+.chat-msg.char.narrator {
+  align-self: center;
+  max-width: 90%;
+  background: rgba(80, 70, 120, 0.25);
+  border-left: 3px solid rgba(180, 160, 255, 0.5);
+  font-style: italic;
+}
+
 .msg-avatar {
   width: 40px;
   height: 40px;
@@ -695,6 +794,52 @@ main {
   cursor: not-allowed;
 }
 
+#export-chat-btn {
+  background: rgba(50, 200, 150, 0.2);
+  color: #66ddaa;
+  border: 1px solid rgba(50, 200, 150, 0.35);
+  border-radius: 12px;
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: flex-end;
+}
+
+#export-chat-btn:hover {
+  background: rgba(50, 200, 150, 0.4);
+  transform: translateY(-2px);
+}
+
+#export-chat-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* World Lore View */
+.lore-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+  width: 100%;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.lore-panel {
+  min-height: unset !important;
+}
+
+.panel-subtitle {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: 0.4rem;
+}
+
 /* Settings View */
 .settings-panel {
   max-width: 600px;
@@ -760,4 +905,333 @@ main {
 
 .primary-btn:hover {
   background: #8e66ff;
+}
+
+/* ======== Quest System Styles ======== */
+.quest-container {
+  padding: 2rem;
+  overflow-y: auto;
+  max-height: 100vh;
+}
+
+.quest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+}
+
+.quest-header h2 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.quest-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: stretch;
+  min-width: 160px;
+}
+
+.import-label {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  padding: 10px 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.quest-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+.quest-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.quest-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.quest-card h3 {
+  margin: 0 0 0.5rem 0;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+}
+
+.quest-card .quest-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+}
+
+.quest-card .quest-tag {
+  background: rgba(119, 85, 255, 0.2);
+  color: var(--accent-color);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.quest-card .quest-preview {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin-bottom: 1rem;
+  max-height: 4.2em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.quest-card .quest-meta {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.quest-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.quest-card-actions button {
+  flex: 1;
+  min-width: 60px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: 0.2s;
+}
+
+.quest-card-actions button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.quest-card-actions .quest-start-btn {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: white;
+  font-weight: bold;
+}
+
+.quest-card-actions .quest-start-btn:hover {
+  background: #8e66ff;
+}
+
+.quest-card-actions .quest-delete-btn:hover {
+  background: rgba(255, 70, 70, 0.3);
+  border-color: #ff4646;
+  color: #ff4646;
+}
+
+/* Quest Editor Form */
+.quest-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 800px;
+}
+
+.quest-editor-form .editor-panel {
+  width: 100%;
+}
+
+/* Dynamic list entries in quest editor */
+.quest-entry {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  position: relative;
+}
+
+.quest-entry .entry-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.quest-entry .entry-number {
+  background: var(--accent-color);
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.quest-entry .remove-entry-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.quest-entry .remove-entry-btn:hover {
+  background: rgba(255, 70, 70, 0.2);
+  color: #ff4646;
+}
+
+/* Quest HUD (in chat view) */
+.quest-hud {
+  background: linear-gradient(135deg, rgba(119, 85, 255, 0.15), rgba(30, 30, 60, 0.8));
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  backdrop-filter: blur(8px);
+}
+
+.quest-hud-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.quest-hud-name {
+  font-weight: bold;
+  color: var(--accent-color);
+  font-size: 1rem;
+}
+
+.quest-hud-progress {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.quest-hud-dots {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.quest-hud-dots .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--glass-border);
+  transition: background 0.3s;
+}
+
+.quest-hud-dots .dot.completed {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.quest-hud-dots .dot.current {
+  background: rgba(119, 85, 255, 0.5);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 6px rgba(119, 85, 255, 0.5);
+}
+
+.quest-hud-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.quest-hud-btn {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: 0.2s;
+}
+
+.quest-hud-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.quest-hud-btn.quest-end {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+.quest-hud-btn.quest-end:hover {
+  background: rgba(255, 70, 70, 0.2);
+}
+
+.quest-hud-select {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  max-width: 180px;
+}
+
+.quest-items-panel {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+}
+
+.quest-items-panel h4 {
+  margin: 0 0 0.5rem 0;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.quest-item-entry {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.quest-item-entry:last-child {
+  border-bottom: none;
+}
+
+.quest-item-entry .item-name {
+  font-weight: bold;
+  color: var(--accent-color);
+  font-size: 0.85rem;
+}
+
+.quest-item-entry .item-desc {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin-top: 2px;
 }

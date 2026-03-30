@@ -17,7 +17,10 @@
         <div class="nav-container">
             <div class="nav-item active" data-view="character-view">Character Sheet</div>
             <div class="nav-item" data-view="chat-view">Chat Terminal</div>
-            <div class="nav-item" data-view="editor-view">Profiles & Editor</div>
+            <div class="nav-item" data-view="party-set-view">Party Setup</div>
+            <div class="nav-item" data-view="char-edit-view">Character Edit</div>
+            <div class="nav-item" data-view="quest-view">Quest / Scenario</div>
+            <div class="nav-item" data-view="lore-view">World Lore</div>
             <div class="nav-item" data-view="settings-view">Settings</div>
             <div class="nav-spacer"></div>
             <div class="nav-item reset-btn" id="reset-chat-btn">
@@ -38,6 +41,26 @@
         <!-- Chat View -->
         <div class="chat-container view-section hidden" id="chat-view">
             <div class="chat-main">
+                <!-- Quest HUD Banner -->
+                <div id="quest-hud" class="quest-hud hidden">
+                    <div class="quest-hud-info">
+                        <span class="quest-hud-name" id="quest-hud-name"></span>
+                        <span class="quest-hud-progress" id="quest-hud-progress"></span>
+                    </div>
+                    <div class="quest-hud-dots" id="quest-hud-dots"></div>
+                    <div class="quest-hud-actions">
+                        <button id="quest-advance-btn" class="quest-hud-btn" title="次のイベントへ">▶ 次へ</button>
+                        <select id="quest-reveal-select" class="quest-hud-select" title="隠された真実を公開">
+                            <option value="">真実を公開...</option>
+                        </select>
+                        <button id="quest-items-toggle" class="quest-hud-btn" title="アイテム/手がかり">📋</button>
+                        <button id="quest-end-btn" class="quest-hud-btn quest-end" title="クエスト終了">終了</button>
+                    </div>
+                    <div id="quest-items-panel" class="quest-items-panel hidden">
+                        <h4>アイテム / 手がかり</h4>
+                        <div id="quest-items-list"></div>
+                    </div>
+                </div>
                 <div class="chat-history" id="chat-history">
                     <!-- Messages will be injected here -->
                 </div>
@@ -46,6 +69,9 @@
                     <button id="banter-btn" title="パーティメンバー同士の掛け合い">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     </button>
+                    <button id="export-chat-btn" title="チャットログをHTMLでエクスポート">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
                     <button id="send-btn">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                     </button>
@@ -53,102 +79,228 @@
             </div>
         </div>
 
-        <!-- Editor View -->
-        <div class="editor-container view-section hidden" id="editor-view">
-            <div class="editor-grid">
-                <!-- User Profile -->
-                <div class="editor-panel">
-                    <h2>User Persona (主人公設定)</h2>
-                    <div class="form-group">
-                        <label>Your Avatar (アイコン画像)</label>
-                        <input type="file" id="user-avatar-upload" accept="image/png, image/jpeg, image/webp">
+        <!-- Party Setup View -->
+        <div class="single-panel-view view-section hidden" id="party-set-view">
+            <div class="editor-panel">
+                <h2>Party Setup <span class="panel-subtitle">(パーティ設定)</span></h2>
+                <p class="hint">プレイヤーキャラと仲間キャラクターをセットしてください。各カードの「Edit」ボタンで Character Edit 画面へ移動します。</p>
+                <div class="party-set-grid" id="party-set-grid">
+                    <!-- Dynamic cards injected by renderPartySetGrid() -->
+                </div>
+                <h3 class="sub-section-title">👥 Party Management (一括管理)</h3>
+                <div class="flex-row" style="margin-top: 0.5rem;">
+                    <button id="export-party-btn" class="primary-btn">Export Party</button>
+                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                        <label class="secondary-btn" style="display:block;text-align:center;cursor:pointer;padding:10px;">
+                            Import Party
+                            <input type="file" id="import-party-file" accept=".json" hidden>
+                        </label>
                     </div>
-                    <div class="form-group">
-                        <label>Your Name</label>
-                        <input type="text" id="user-name" placeholder="User" value="User">
-                    </div>
-                    <div class="form-group">
-                        <label>Your Persona / Appearance</label>
-                        <textarea id="user-persona" rows="5" placeholder="あなたの外見、性格、背景などを入力します。AIがこれを見て反応を変えます。"></textarea>
-                    </div>
-                    <button id="save-user-btn" class="primary-btn">Save User Persona</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Character Edit View (統一エディタ) -->
+        <div class="single-panel-view view-section hidden" id="char-edit-view">
+            <div class="editor-panel">
+                <h2>Character Edit <span class="panel-subtitle">(キャラクター編集)</span></h2>
+                <div class="slot-tabs" id="edit-tabs">
+                    <div class="slot-tab active" data-edit-target="player">Player</div>
+                    <div class="slot-tab" data-edit-target="0">Slot 1</div>
+                    <div class="slot-tab" data-edit-target="1">Slot 2</div>
+                    <div class="slot-tab" data-edit-target="2">Slot 3</div>
+                </div>
+                <div id="slot-avatar-preview" class="slot-avatar-preview"></div>
+                <div class="form-group">
+                    <label>Avatar (キャラクター画像)</label>
+                    <input type="file" id="edit-char-avatar" accept="image/png, image/jpeg, image/webp">
+                </div>
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="edit-char-name">
+                </div>
+                <div class="form-group">
+                    <label>Personality (カンマ区切り)</label>
+                    <input type="text" id="edit-char-personality">
+                </div>
+                <div class="form-group">
+                    <label>Description (外見・背景)</label>
+                    <textarea id="edit-char-desc" rows="4"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Scenario</label>
+                    <textarea id="edit-char-scenario" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>First Message</label>
+                    <textarea id="edit-char-firstmes" rows="4"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Sample Dialogue (セリフ例)</label>
+                    <textarea id="edit-char-examples" rows="4"></textarea>
                 </div>
 
-                <!-- Character Editor (with integrated Lorebook per slot) -->
-                <div class="editor-panel">
-                    <h2>Character Editor (キャラクター編集)</h2>
-                    <div class="slot-tabs">
-                        <div class="slot-tab active" data-slot="0">Slot 1</div>
-                        <div class="slot-tab" data-slot="1">Slot 2</div>
-                        <div class="slot-tab" data-slot="2">Slot 3</div>
-                    </div>
-                    <div id="slot-avatar-preview" class="slot-avatar-preview"></div>
-                    <div class="form-group">
-                        <label>Character Avatar (キャラクター画像)</label>
-                        <input type="file" id="edit-char-avatar" accept="image/png, image/jpeg, image/webp">
-                    </div>
-                    <div class="form-group">
-                        <label>Name</label>
-                        <input type="text" id="edit-char-name">
-                    </div>
-                    <div class="form-group">
-                        <label>Personality (カンマ区切り)</label>
-                        <input type="text" id="edit-char-personality">
-                    </div>
-                    <div class="form-group">
-                        <label>Description</label>
-                        <textarea id="edit-char-desc" rows="4"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>Scenario</label>
-                        <textarea id="edit-char-scenario" rows="3"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>First Message</label>
-                        <textarea id="edit-char-firstmes" rows="4"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>Sample Dialogue (セリフ例)</label>
-                        <textarea id="edit-char-examples" rows="4"></textarea>
-                    </div>
+                <!-- Lorebook (per-character) -->
+                <h3 class="sub-section-title">📖 Lorebook (キャラ固有設定)</h3>
+                <p class="hint">このキャラクターに関連する世界観設定。Keywordがチャットに出現するとAIに注入されます。</p>
+                <div id="lorebook-entries" class="lore-list"></div>
+                <button id="add-lore-btn" class="secondary-btn">+ エントリを追加</button>
 
-                    <!-- Lorebook (per-slot) -->
-                    <h3 class="sub-section-title">📖 Lorebook (世界観設定)</h3>
-                    <p class="hint">このスロットのキャラクターに関連する世界観設定。Keywordがチャットに出現するとAIに自動で注入されます。</p>
-                    <div id="lorebook-entries" class="lore-list">
-                        <!-- Entries dynamic injection -->
-                    </div>
-                    <button id="add-lore-btn" class="secondary-btn">+ Add New Entry</button>
+                <!-- Actions -->
+                <div class="flex-row" style="margin-top: 1.5rem;">
+                    <button id="save-char-btn" class="primary-btn">Save</button>
+                    <button id="export-char-btn" class="secondary-btn">Export JSON</button>
+                </div>
+                <div class="form-group" style="margin-top: 1rem;">
+                    <label>Import JSON <span class="hint-inline">(rp_engine_card_v1 / chara_card_v2 対応)</span></label>
+                    <input type="file" id="import-char-file" accept=".json">
+                </div>
+                <button id="clear-slot-btn" class="danger-btn" style="margin-top: 0.5rem;">🗑 Clear This Slot</button>
+            </div>
+        </div>
 
-                    <!-- Common Lorebook (Global) -->
-                    <h3 class="sub-section-title">🌍 Common Lorebook (共通世界観設定)</h3>
-                    <p class="hint">全キャラクターに共通する世界観設定。どのキャラとの会話でも、Keywordが出現すると注入されます。</p>
-                    <div id="common-lorebook-entries" class="lore-list">
-                        <!-- Entries dynamic injection -->
-                    </div>
-                    <div class="flex-row">
-                        <button id="add-common-lore-btn" class="secondary-btn" style="flex: 2;">+ Add Common Lore Entry</button>
-                        <button id="save-common-lore-btn" class="primary-btn" style="flex: 1;">Save Global Lore</button>
-                    </div>
+        <!-- World Lore View -->
+        <div class="lore-container view-section hidden" id="lore-view">
+            <div class="editor-panel lore-panel">
+                <h2>🌍 World Lore <span class="panel-subtitle">(共通世界観設定)</span></h2>
+                <p class="hint">全キャラクターに共通する世界観設定です。チャット中にKeywordが出現すると、自動でAIに注入されます。キャラクター固有のロアブックは「Profiles &amp; Editor」→「Character Editor」で設定してください。</p>
+                <div id="common-lorebook-entries" class="lore-list">
+                    <!-- Entries dynamic injection -->
+                </div>
+                <div class="flex-row" style="margin-top: 0.5rem;">
+                    <button id="add-common-lore-btn" class="secondary-btn" style="flex: 2;">+ エントリを追加</button>
+                    <button id="save-common-lore-btn" class="primary-btn" style="flex: 1;">保存</button>
+                </div>
+            </div>
+        </div>
 
-                    <!-- Party Management -->
-                    <h3 class="sub-section-title">👥 Party Management (パーティ一括管理)</h3>
-                    <div class="flex-row" style="margin-top: 1rem;">
-                        <button id="export-party-btn" class="primary-btn">Export Entire Party</button>
-                        <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                            <input type="file" id="import-party-file" accept=".json" style="padding: 10px;">
+        <!-- Quest View -->
+        <div class="quest-container view-section hidden" id="quest-view">
+            <!-- Quest Library (default sub-view) -->
+            <div id="quest-library-view">
+                <div class="quest-header">
+                    <h2>Quest Library</h2>
+                    <div class="quest-actions">
+                        <button id="new-quest-btn" class="primary-btn">+ 新規クエスト作成</button>
+                        <label class="secondary-btn import-label">
+                            インポート
+                            <input type="file" id="import-quest-file" accept=".json" hidden>
+                        </label>
+                    </div>
+                </div>
+                <div id="quest-library-grid" class="quest-library-grid">
+                    <div class="loading">クエストがまだありません。「新規クエスト作成」または「インポート」で追加してください。</div>
+                </div>
+            </div>
+
+            <!-- Quest Editor (hidden by default) -->
+            <div id="quest-editor-view" class="hidden">
+                <div class="quest-header">
+                    <button id="quest-back-btn" class="secondary-btn">← ライブラリに戻る</button>
+                    <h2 id="quest-editor-title">クエスト編集</h2>
+                </div>
+                <div class="quest-editor-form">
+                    <!-- Metadata -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">基本情報</h3>
+                        <div class="form-group">
+                            <label>クエスト名</label>
+                            <input type="text" id="quest-name" placeholder="クエストの名前">
+                        </div>
+                        <div class="form-group">
+                            <label>タグ (カンマ区切り)</label>
+                            <input type="text" id="quest-tags" placeholder="adventure, 東方, horror">
+                        </div>
+                        <div class="form-group">
+                            <label>著者</label>
+                            <input type="text" id="quest-author" placeholder="作成者名">
+                        </div>
+                        <div class="form-group">
+                            <label>推奨パーティ人数</label>
+                            <input type="number" id="quest-party-size" min="1" max="3" value="2">
                         </div>
                     </div>
 
-                    <div class="form-group" style="margin-top: 1.5rem;">
-                        <label>JSON Import (単体キャラ用)</label>
-                        <input type="file" id="import-char-file" accept=".json">
+                    <!-- Selection Text -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">クエスト選択画面テキスト</h3>
+                        <p class="hint">プレイヤーがクエスト開始前に読む説明文です。</p>
+                        <div class="form-group">
+                            <textarea id="quest-selection-text" rows="4" placeholder="冒険者たちは、洞窟の奥に眠る秘宝の噂を聞きつけた..."></textarea>
+                        </div>
                     </div>
+
+                    <!-- Prologue -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">プロローグ概要</h3>
+                        <p class="hint">AIがプロローグを生成する際のガイドラインです。空欄の場合、導入会話がそのまま表示されます。</p>
+                        <div class="form-group">
+                            <textarea id="quest-prologue" rows="4" placeholder="パーティは酒場で依頼を受け、森の奥にある洞窟へ向かう..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- AI Instructions -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">AI指示 (必須遵守ルール)</h3>
+                        <p class="hint">AIが絶対に守るべきルール。[主目的]、[進行]、[キャラクター] などのヘッダーで整理してください。</p>
+                        <div id="quest-ai-instructions" class="lore-list"></div>
+                        <button id="add-ai-instruction-btn" class="secondary-btn">+ AI指示を追加</button>
+                    </div>
+
+                    <!-- Background -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">クエスト背景設定</h3>
+                        <p class="hint">このクエストが発生した背景・世界観。AIに常時注入されます。</p>
+                        <div class="form-group">
+                            <textarea id="quest-background" rows="4" placeholder="古代の魔法使いが残した洞窟で..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Events -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">イベント列 (ストーリー進行)</h3>
+                        <p class="hint">番号順にストーリーが進行します。AIはこの順序に沿いますが、プレイヤーの行動で変化します。</p>
+                        <div id="quest-events" class="lore-list"></div>
+                        <button id="add-event-btn" class="secondary-btn">+ イベントを追加</button>
+                    </div>
+
+                    <!-- Additional Settings -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">追加設定 (補足世界観)</h3>
+                        <p class="hint">背景に収まらない詳細設定。AIが描写に反映します。</p>
+                        <div id="quest-additional-settings" class="lore-list"></div>
+                        <button id="add-additional-setting-btn" class="secondary-btn">+ 追加設定を追加</button>
+                    </div>
+
+                    <!-- Hidden Truths -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">隠された真実</h3>
+                        <p class="hint">ストーリーが進むと段階的に明かされる秘密。公開前のものはAIに送信されません。</p>
+                        <div id="quest-hidden-truths" class="lore-list"></div>
+                        <button id="add-hidden-truth-btn" class="secondary-btn">+ 隠された真実を追加</button>
+                    </div>
+
+                    <!-- Items / Clues -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">アイテム / 手がかり</h3>
+                        <p class="hint">プロローグ後にプレイヤーに表示される情報です。</p>
+                        <div id="quest-items-clues" class="lore-list"></div>
+                        <button id="add-item-clue-btn" class="secondary-btn">+ アイテム/手がかりを追加</button>
+                    </div>
+
+                    <!-- Introduction Dialogue -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">導入会話 (オプション)</h3>
+                        <p class="hint">空欄にするとAIがパーティ構成に合わせてプロローグを生成します。記入すると固定のプロローグになります。</p>
+                        <div class="form-group">
+                            <textarea id="quest-intro-dialogue" rows="6" placeholder="ナレーション：ある晴れた日のこと、冒険者ギルドの掲示板に一枚の依頼書が貼り出された..."></textarea>
+                        </div>
+                    </div>
+
                     <div class="flex-row" style="margin-top: 1rem;">
-                        <button id="save-char-btn" class="primary-btn">Save Character & Lore</button>
-                        <button id="export-char-btn" class="secondary-btn">Export JSON</button>
+                        <button id="save-quest-btn" class="primary-btn">クエストを保存</button>
+                        <button id="export-quest-btn" class="secondary-btn">エクスポート</button>
                     </div>
-                    <button id="clear-slot-btn" class="danger-btn" style="margin-top: 0.5rem;">🗑 Clear This Slot</button>
                 </div>
             </div>
         </div>
