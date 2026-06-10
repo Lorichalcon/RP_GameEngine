@@ -12,6 +12,10 @@
         <div class="blob blob-2"></div>
     </div>
 
+    <!-- モバイル用ハンバーガーメニュー（≤768px でのみ表示） -->
+    <button id="mobile-menu-btn" aria-label="メニューを開く">☰</button>
+    <div id="mobile-backdrop" class="hidden"></div>
+
     <aside>
         <div class="logo">RP ENGINE</div>
         <div class="nav-container">
@@ -545,7 +549,19 @@
                 <div class="form-group">
                     <label>API Timeout (秒)</label>
                     <input type="number" id="api-timeout" placeholder="180" value="180" min="0">
-                    <div class="hint">LLMバックエンドが応答しない場合に自動でリクエストを中断する秒数。0でタイムアウト無効。長時間生成する場合は300〜600推奨。</div>
+                    <div class="hint">LLMバックエンドが応答しない場合に自動でリクエストを中断する秒数。0でタイムアウト無効。長時間生成する場合は300〜600推奨。<br>⚡ ストリーミングON時は「無応答が続いた時間」で判定するため、生成が続く限り中断されません。</div>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="streaming-enabled" checked> ⚡ <strong>ストリーミング応答</strong>（生成途中をリアルタイム表示）</label>
+                    <div class="hint">KoboldCpp / Ollama 等の SSE 対応バックエンドで、文字が流れるように表示されます。非対応バックエンドへは自動フォールバック（従来どおり全文待ち）</div>
+                </div>
+                <div class="form-group">
+                    <label>📦 ローカルストレージ使用量</label>
+                    <div id="storage-meter" class="storage-meter">
+                        <div class="storage-meter-bar"><div class="storage-meter-fill"></div></div>
+                        <span class="storage-meter-text">計測中…</span>
+                    </div>
+                    <div class="hint">ブラウザの localStorage 上限は約5MB。逼迫したら古いセッション削除やパーティ整理を。アバターは自動でWebP圧縮されます</div>
                 </div>
 
                 <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">

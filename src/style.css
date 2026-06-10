@@ -3103,3 +3103,152 @@ main {
 }
 #app-toast[data-type="error"] { border-left-color: #f44336; }
 #app-toast[data-type="info"]  { border-left-color: #42a5f5; }
+
+/* ======== ストリーミング応答プレビュー ======== */
+.streaming-preview {
+  margin: 0.6rem 0;
+  padding: 0.8rem 1rem;
+  border-radius: 12px;
+  background: rgba(124, 77, 255, 0.07);
+  border: 1px dashed rgba(124, 77, 255, 0.4);
+  animation: streaming-pulse 1.6s ease-in-out infinite;
+}
+.streaming-preview-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-color, #7c4dff);
+  margin-bottom: 0.4rem;
+}
+.streaming-preview-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  opacity: 0.9;
+}
+@keyframes streaming-pulse {
+  0%, 100% { border-color: rgba(124, 77, 255, 0.4); }
+  50%      { border-color: rgba(124, 77, 255, 0.85); }
+}
+
+/* ======== ストレージ使用量メーター ======== */
+.storage-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+.storage-meter-bar {
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.storage-meter-fill {
+  height: 100%;
+  width: 0%;
+  background: #4caf50;
+  border-radius: 5px;
+  transition: width 0.4s ease, background 0.4s ease;
+}
+.storage-meter-text {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ======== モバイル対応 (≤768px) ======== */
+#mobile-menu-btn {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1100;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(30, 32, 48, 0.92);
+  color: #fff;
+  border: 1px solid var(--border-color);
+  font-size: 1.25rem;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+#mobile-backdrop { display: none; }
+
+@media (max-width: 768px) {
+  #mobile-menu-btn { display: flex; }
+  #mobile-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 999;
+  }
+  #mobile-backdrop.hidden { display: none; }
+
+  /* サイドバー → オフキャンバスドロワー */
+  aside {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    z-index: 1000;
+    width: min(78vw, 280px);
+    transform: translateX(-105%);
+    transition: transform 0.25s ease;
+    padding: 1.2rem;
+    gap: 1rem;
+    overflow-y: auto;
+  }
+  aside.open { transform: translateX(0); }
+
+  main {
+    padding: 0.8rem;
+    padding-top: 64px; /* ハンバーガー分の余白 */
+    width: 100%;
+  }
+
+  /* チャット: ツールバーは横スクロール、入力欄は全幅 */
+  .chat-toolbar {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .chat-input-row { flex-wrap: wrap; }
+  #chat-input {
+    flex-basis: 100%;
+    min-height: 48px;
+    font-size: 16px; /* iOS の自動ズーム防止 */
+  }
+
+  /* サイドパネル類は中央オーバーレイ化 */
+  .player-notes-panel,
+  .info-panel {
+    position: fixed !important;
+    left: 4vw !important;
+    right: 4vw !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: 70vh;
+    z-index: 1050;
+  }
+
+  /* Settings sticky バー折返し */
+  #settings-accordion-controls { flex-wrap: wrap; gap: 0.5rem; }
+
+  /* パーティ系グリッドは2列 */
+  .party-set-grid,
+  .party-sheet-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.6rem;
+  }
+
+  /* タッチターゲット最低 44px */
+  .msg-control-btn {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}

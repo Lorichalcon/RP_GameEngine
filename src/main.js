@@ -1,4 +1,5 @@
 import './style.css'
+import { parseChoicesTag, parseInfoTag } from './parsers.js'
 
 // ======== コンテキストウィンドウ設定 ========
 // LLMへの送信時に保持するチャット履歴のターン数（user+assistantの1往復=1ターン）。
@@ -100,6 +101,90 @@ let narratorVoice = (function() {
     } catch (e) { /* noop */ }
     return { engine: 'none', speakerId: '', voiceURI: '', pitch: 1.0, speed: 1.0 };
 })();
+
+// ======== ストリーミング応答 ========
+// SSE (stream: true) で生成途中をリアルタイム表示。非対応バックエンドへは自動フォールバック。
+let streamingEnabled = localStorage.getItem('streamingEnabled') !== '0'; // デフォON
+
+/** 生成途中テキストをチャット欄に仮表示する */
+function updateStreamingPreview(text) {
+    const history = document.getElementById('chat-history');
+    if (!history) return;
+    let el = document.getElementById('streaming-preview');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'streaming-preview';
+        el.className = 'streaming-preview';
+        el.innerHTML = '<div class="streaming-preview-label">✍️ 生成中…</div><div class="streaming-preview-text"></div>';
+        history.appendChild(el);
+    }
+    const t = el.querySelector('.streaming-preview-text');
+    if (t) t.textContent = text;
+    history.scrollTop = history.scrollHeight;
+}
+
+function removeStreamingPreview() {
+    const el = document.getElementById('streaming-preview');
+    if (el) el.remove();
+}
+
+/**
+ * SSE ストリームを読み切って全文を返す。
+ * - チャンク受信ごとにプレビュー更新
+ * - timeoutSec 秒間チャンクが来なければ停滞とみなし abort（生成が続く限り中断しない）
+ * - 中断時に途中まで生成済みなら部分テキストを返す（全損を防ぐ）
+ */
+async function _readSseStreamToText(response, abortCtrl) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    let buffer = '';
+    let stallTimer = null;
+    const resetStall = () => {
+        if (!apiConfig.timeoutSec || apiConfig.timeoutSec <= 0) return;
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+            console.warn('[stream] no chunk for ' + apiConfig.timeoutSec + 's → abort');
+            abortCtrl.abort();
+        }, apiConfig.timeoutSec * 1000);
+    };
+    resetStall();
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            resetStall();
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // 不完全な最終行は次チャンクへ持ち越し
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) continue;
+                const jsonStr = trimmed.slice(5).trim();
+                if (jsonStr === '[DONE]') continue;
+                try {
+                    const data = JSON.parse(jsonStr);
+                    const delta = data.choices && data.choices[0] && data.choices[0].delta;
+                    if (delta && typeof delta.content === 'string') {
+                        fullContent += delta.content;
+                        updateStreamingPreview(fullContent);
+                    }
+                } catch (e) { /* 分割途中の行はスキップ */ }
+            }
+        }
+    } catch (err) {
+        if (err.name === 'AbortError' && fullContent) {
+            console.warn('[stream] aborted mid-generation, returning partial content');
+            return fullContent + '\n\n（…タイムアウトにより途中で打ち切られました）';
+        }
+        throw err;
+    } finally {
+        if (stallTimer) clearTimeout(stallTimer);
+        try { reader.releaseLock(); } catch (e) { /* noop */ }
+        removeStreamingPreview();
+    }
+    return fullContent;
+}
 
 // ======== Web Search (検索結果を裏で system prompt に注入) ========
 let webSearchEnabled       = localStorage.getItem('webSearchEnabled') === '1';
@@ -1539,6 +1624,25 @@ function setupNavigation() {
         });
     });
 
+    // ===== モバイル: ハンバーガードロワー =====
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    const backdrop = document.getElementById('mobile-backdrop');
+    const sidebar = document.querySelector('aside');
+    const closeDrawer = () => {
+        if (sidebar) sidebar.classList.remove('open');
+        if (backdrop) backdrop.classList.add('hidden');
+    };
+    if (menuBtn && sidebar) {
+        menuBtn.addEventListener('click', () => {
+            const opening = !sidebar.classList.contains('open');
+            sidebar.classList.toggle('open', opening);
+            if (backdrop) backdrop.classList.toggle('hidden', !opening);
+        });
+    }
+    if (backdrop) backdrop.addEventListener('click', closeDrawer);
+    // ビュー選択でドロワーを閉じる（デスクトップでは class が無いため no-op）
+    navItems.forEach(item => item.addEventListener('click', closeDrawer));
+
     // Alt+1〜7 でビュー高速切替（入力中でも Alt 併用なので誤爆しない）
     const viewOrder = ['character-view', 'chat-view', 'party-set-view', 'char-edit-view', 'quest-view', 'lore-view', 'settings-view'];
     document.addEventListener('keydown', function(e) {
@@ -1572,6 +1676,42 @@ function setupNavigation() {
             }
         });
     }
+}
+
+// ---- localStorage 容量ガード ----
+// QuotaExceededError を握りつぶさず、ユーザーに分かる形で通知する。
+// 大物（チャット履歴・パーティ）の保存に使用。
+function safeSetItem(key, value) {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (e) {
+        console.error('[storage] setItem failed:', key, e);
+        showToast('⚠️ ストレージ容量が上限です。保存に失敗しました（古いセッションの削除を推奨）', 'error');
+        return false;
+    }
+}
+
+// Settings のストレージ使用量メーターを更新
+function updateStorageMeter() {
+    const el = document.getElementById('storage-meter');
+    if (!el) return;
+    let totalBytes = 0;
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            totalBytes += (k.length + (localStorage.getItem(k) || '').length) * 2; // UTF-16
+        }
+    } catch (e) { /* noop */ }
+    const mb = totalBytes / (1024 * 1024);
+    const pct = Math.min(100, (mb / 5) * 100);
+    const fill = el.querySelector('.storage-meter-fill');
+    const text = el.querySelector('.storage-meter-text');
+    if (fill) {
+        fill.style.width = pct.toFixed(1) + '%';
+        fill.style.background = pct > 80 ? '#f44336' : (pct > 60 ? '#ffa726' : '#4caf50');
+    }
+    if (text) text.textContent = mb.toFixed(2) + ' MB / 約5 MB（' + pct.toFixed(0) + '%）';
 }
 
 // ---- Toast 通知（alert の非ブロッキング代替） ----
@@ -1676,6 +1816,13 @@ function setupSettings() {
     document.getElementById('api-tokens').value = apiConfig.tokens;
     const timeoutInput = document.getElementById('api-timeout');
     if (timeoutInput) timeoutInput.value = apiConfig.timeoutSec;
+
+    // ===== ストリーミング設定の読み込み =====
+    const streamingEl = document.getElementById('streaming-enabled');
+    if (streamingEl) streamingEl.checked = streamingEnabled;
+
+    // ===== ストレージ使用量メーター =====
+    updateStorageMeter();
 
     // ===== ナレーター用ボイス設定の読み込み =====
     const nvEngineEl   = document.getElementById('narrator-voice-engine');
@@ -1807,6 +1954,10 @@ function setupSettings() {
         localStorage.setItem('apiTokens', apiConfig.tokens);
         localStorage.setItem('apiTimeoutSec', String(apiConfig.timeoutSec));
 
+        // ===== ストリーミング設定の保存 =====
+        if (streamingEl) streamingEnabled = !!streamingEl.checked;
+        localStorage.setItem('streamingEnabled', streamingEnabled ? '1' : '0');
+
         // ===== ナレーター用ボイス設定の保存 =====
         if (nvEngineEl) {
             const engine = nvEngineEl.value || 'none';
@@ -1923,6 +2074,7 @@ function setupSettings() {
             if (aiMemoCount) aiMemoCount.textContent = String(aiMemoList.length);
         }
 
+        updateStorageMeter();
         showToast('✅ Settings を保存しました');
     });
 }
@@ -2808,7 +2960,7 @@ function setEditTargetData(data) {
         saveUserConfig();
     } else {
         characterDataArray[editTarget] = data;
-        localStorage.setItem('savedParty', JSON.stringify(characterDataArray));
+        safeSetItem('savedParty', JSON.stringify(characterDataArray));
     }
 }
 
@@ -2857,7 +3009,7 @@ function setupPartySet() {
                         userConfig.lorebook    = json.user_config.lorebook    || [];
                         saveUserConfig();
                     }
-                    localStorage.setItem('savedParty', JSON.stringify(characterDataArray));
+                    safeSetItem('savedParty', JSON.stringify(characterDataArray));
                     localStorage.setItem('savedCommonLore', JSON.stringify(commonLorebook));
                     renderPartySheet();
                     renderPartySetGrid();
@@ -2982,7 +3134,7 @@ function renderPartySetGrid() {
                 name: 'Slot ' + (idx+1) + ' Empty', tags: ["Draft"], personality: "Unknown",
                 description: "", scenario: "", first_mes: "", mes_example: "", sdPrompt: "", avatar: "", lorebook: []
             };
-            localStorage.setItem('savedParty', JSON.stringify(characterDataArray));
+            safeSetItem('savedParty', JSON.stringify(characterDataArray));
             // クリアしたスロットが現在のeditTargetと一致する場合、フォームも同期する
             if (editTarget === idx) {
                 loadEditTargetIntoEditor();
@@ -3020,7 +3172,7 @@ function renderPartySetGrid() {
                 const npc = await generateNpcByLLM();
                 if (!npc || !npc.name) throw new Error('LLM 生成結果が不正です。');
                 characterDataArray[idx] = npc;
-                localStorage.setItem('savedParty', JSON.stringify(characterDataArray));
+                safeSetItem('savedParty', JSON.stringify(characterDataArray));
                 renderPartySheet();
                 renderPartySetGrid();
                 updateEditTabNames();
@@ -3517,7 +3669,7 @@ function setupCharacterEdit() {
             name: 'Slot ' + (idx + 1) + ' Empty', tags: ["Draft"], personality: "Unknown",
             description: "", scenario: "", first_mes: "", mes_example: "", sdPrompt: "", avatar: "", lorebook: []
         };
-        localStorage.setItem('savedParty', JSON.stringify(characterDataArray));
+        safeSetItem('savedParty', JSON.stringify(characterDataArray));
         loadEditTargetIntoEditor();
         renderPartySheet();
         renderPartySetGrid();
@@ -3929,7 +4081,7 @@ function saveChatHistory() {
         if (entry.statusSnapshot) saved.statusSnapshot = entry.statusSnapshot;
         return saved;
     });
-    localStorage.setItem('chatHistory_' + getPartyId(), JSON.stringify(historyToSave));
+    safeSetItem('chatHistory_' + getPartyId(), JSON.stringify(historyToSave));
 }
 
 function appendMessage(role, text, name, shouldSave = true, forcedIndex = -1, statusForSpeaker = null) {
@@ -4432,58 +4584,7 @@ function parseStatusTag(content) {
     return { deltas, cleanedContent };
 }
 
-/**
- * [CHOICES]...[/CHOICES] ブロックから選択肢配列を抽出し、本文から除去する。
- * 想定フォーマット:
- *   [CHOICES]
- *   1. 選択肢A
- *   2. 選択肢B
- *   3. 選択肢C
- *   [/CHOICES]
- */
-function parseChoicesTag(content) {
-    if (!content) return { choices: [], cleanedContent: content || '' };
-
-    let block = null;
-    let cleanedContent = content;
-
-    // 1. 正規ペア [CHOICES]...[/CHOICES]
-    const pairRegex = /\[CHOICES\]([\s\S]*?)\[\/CHOICES\]/i;
-    const pairMatch = content.match(pairRegex);
-    if (pairMatch) {
-        block = pairMatch[1];
-        cleanedContent = content.replace(pairRegex, '').trim();
-    } else {
-        // 2. フォールバック: 閉じタグ欠落（LLM が [/CHOICES] を出し忘れ / EOS で途切れた）
-        //    [CHOICES] 以降を末尾まで取得。ただし次の主要タグ（[INFO] / [SPEAKER:）が来たらそこで止める。
-        //    ※ INFO は本関数より前に抽出・除去済みのため、通常は末尾まで安全に取れる。
-        const openMatch = content.match(/\[CHOICES\]([\s\S]*)$/i);
-        if (openMatch) {
-            let rest = openMatch[1];
-            const stopMatch = rest.match(/\[\/?INFO\]|\[SPEAKER:/i);
-            if (stopMatch) rest = rest.slice(0, stopMatch.index);
-            block = rest;
-            // 本文からは [CHOICES] 以降を丸ごと除去（番号行のみだったと仮定）
-            cleanedContent = content.slice(0, openMatch.index).trim();
-        }
-    }
-
-    if (block === null) return { choices: [], cleanedContent: content };
-
-    const choices = [];
-    block.split(/\n/).forEach(line => {
-        // 行頭の番号と区切り（. ) : space）を許容
-        const m = line.trim().match(/^[0-9]+\s*[.):、]\s*(.+)$/);
-        if (m && m[1].trim()) choices.push(m[1].trim());
-    });
-
-    // フォールバックで番号行が1つも取れなかった場合は誤検出を避けて元の本文を保持
-    if (choices.length === 0 && !pairMatch) {
-        return { choices: [], cleanedContent: content };
-    }
-
-    return { choices, cleanedContent };
-}
+// parseChoicesTag は src/parsers.js へ移動（モジュール分割第一歩）
 
 /**
  * AI 応答末尾の選択肢ボタンを最後のチャット末尾に描画。
@@ -4540,21 +4641,7 @@ function clearChoiceButtons() {
 }
 
 // ======== Info Panel パース/レンダ/制御 ========
-
-/**
- * AI応答から [INFO]...[/INFO] ブロックを抽出。
- * 戻り値: { infoText: string|null, cleanedContent: string }
- * infoText が null なら未生成。あれば lastInfoSnapshot に保存して描画する。
- */
-function parseInfoTag(content) {
-    if (!content) return { infoText: null, cleanedContent: content || '' };
-    const regex = /\[INFO\]([\s\S]*?)\[\/INFO\]/i;
-    const match = content.match(regex);
-    if (!match) return { infoText: null, cleanedContent: content };
-    const infoText = (match[1] || '').trim();
-    const cleanedContent = content.replace(regex, '').trim();
-    return { infoText: infoText || null, cleanedContent };
-}
+// parseInfoTag は src/parsers.js へ移動（モジュール分割第一歩）
 
 /**
  * Info Panel に infoText を描画。空文字なら placeholder 表示。
@@ -6377,9 +6464,10 @@ async function fetchChatCompletion(mode) {
         model: apiConfig.model,
         messages: messages,
         temperature: 0.8,
-        max_tokens: apiConfig.tokens
+        max_tokens: apiConfig.tokens,
+        stream: !!streamingEnabled
     };
-    
+
     var headers = {
         'Content-Type': 'application/json'
     };
@@ -6426,38 +6514,47 @@ async function fetchChatCompletion(mode) {
         throw new Error('API Error ' + response.status + ': ' + errText);
     }
 
-    var result = await response.json();
-    if(result.choices && result.choices.length > 0) {
-        var content = result.choices[0].message.content;
-        
-        // --- 強力な <think> 除去処理 ---
-        // 1. 基本的な <think>...</think> の除去（大文字小文字無視、複数対応）
-        content = content.replace(/<think>[\s\S]*?<\/think>/gi, '');
-        
-        // 2. 閉じタグがない場合（トークン切れや生成途中）の対応
-        // Qwen3などは思考が始まると <think> で始まるので、これ以降を一度切り捨てる
-        if(content.includes('<think>')) {
-             let parts = content.split('<think>');
-             // <think>より前の部分だけを結合する（もし複数あれば）
-             content = parts[0];
-        }
-        
-        // タグの残骸などをトリム
-        content = content.trim();
-        
-        // もし生成結果に対しても {{user}} だけは即座に適用したい場合はここで置き換える
-        // ただし {{char}} は splitAndAppendCharMessages 内で話者ごとに適用する
-        content = content.replace(/{{user}}/gi, userConfig.name);
-        
-        // もし除去した結果、空っぽになってしまった場合（思考プロセスしか出力されなかった場合）のガード
-        if(!content) {
-            return "(思考プロセスのみが返されました。Max Tokensを増やすか、もう一度試してみてください。)";
-        }
-        
-        return content;
+    // ===== 応答取得: SSE ストリーミング or 通常 JSON =====
+    // stream: true を要求しても非対応バックエンドは普通の JSON を返すため、
+    // Content-Type で実際の形式を判定して自動フォールバックする。
+    var content;
+    const _respType = (response.headers.get('content-type') || '').toLowerCase();
+    if (streamingEnabled && response.body && _respType.includes('text/event-stream')) {
+        content = await _readSseStreamToText(response, _abortCtrl);
     } else {
-        throw new Error("Invalid API response structure");
+        var result = await response.json();
+        if (result.choices && result.choices.length > 0) {
+            content = result.choices[0].message.content;
+        } else {
+            throw new Error("Invalid API response structure");
+        }
     }
+
+    // --- 強力な <think> 除去処理 ---
+    // 1. 基本的な <think>...</think> の除去（大文字小文字無視、複数対応）
+    content = (content || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
+
+    // 2. 閉じタグがない場合（トークン切れや生成途中）の対応
+    // Qwen3などは思考が始まると <think> で始まるので、これ以降を一度切り捨てる
+    if(content.includes('<think>')) {
+         let parts = content.split('<think>');
+         // <think>より前の部分だけを結合する（もし複数あれば）
+         content = parts[0];
+    }
+
+    // タグの残骸などをトリム
+    content = content.trim();
+
+    // もし生成結果に対しても {{user}} だけは即座に適用したい場合はここで置き換える
+    // ただし {{char}} は splitAndAppendCharMessages 内で話者ごとに適用する
+    content = content.replace(/{{user}}/gi, userConfig.name);
+
+    // もし除去した結果、空っぽになってしまった場合（思考プロセスしか出力されなかった場合）のガード
+    if(!content) {
+        return "(思考プロセスのみが返されました。Max Tokensを増やすか、もう一度試してみてください。)";
+    }
+
+    return content;
 }
 
 // ======== QUEST UI SYSTEM ========
@@ -8188,7 +8285,7 @@ function loadChatSession(file) {
 
             // パーティ復元
             characterDataArray = data.party || [null, null, null];
-            localStorage.setItem('savedParty', JSON.stringify(characterDataArray));
+            safeSetItem('savedParty', JSON.stringify(characterDataArray));
 
             // ユーザー設定復元
             if (data.userConfig) {
