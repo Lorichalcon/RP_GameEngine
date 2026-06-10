@@ -22,3 +22,31 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ===== 個人データ（公開リポジトリに含めない） =====
+# RPセッションのログ・セーブデータ
+ScenarioLog/
+save/
+コンソールログ/
+シュガーラッシュ/
+CharactorCard/
+
+# 個人メモ・プラン
+AIのメモリー.txt
+Claudeプラン.md
+
+# 個人のパーティ・キャラ画像（エンジン同梱サンプル以外）
+public/party_export_*.json
+public/ハルsq.png
+public/main_your-guardian-angel-*.png
+public/image_movienew.png
+
+# 個人シナリオ（free_world テンプレのみコミット対象）
+public/sample_quest_after_archive_*.json
+public/sample_quest_bocchi_*.json
+public/sample_quest_lepora_*.json
+public/sample_quest_saiba_*.json
+
+# 一時ファイル・実験スクリプト
+C?Users*
+*.tmp

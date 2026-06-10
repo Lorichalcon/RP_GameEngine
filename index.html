@@ -53,6 +53,7 @@
                         <select id="quest-reveal-select" class="quest-hud-select" title="隠された真実を公開">
                             <option value="">真実を公開...</option>
                         </select>
+                        <button id="quest-truths-toggle" class="quest-hud-btn" title="公開済みの真実">🔓</button>
                         <button id="quest-items-toggle" class="quest-hud-btn" title="アイテム/手がかり">📋</button>
                         <button id="quest-end-btn" class="quest-hud-btn quest-end" title="クエスト終了">終了</button>
                     </div>
@@ -60,21 +61,162 @@
                         <h4>アイテム / 手がかり</h4>
                         <div id="quest-items-list"></div>
                     </div>
+                    <div id="quest-truths-panel" class="quest-items-panel hidden">
+                        <h4>公開済みの真実</h4>
+                        <div id="quest-truths-list"></div>
+                    </div>
+                </div>
+                <!-- Status Parameter HUD (シナリオにパラメーターがあるとき表示) -->
+                <div id="status-param-hud" class="status-param-hud hidden">
+                    <div class="status-param-hud-header">
+                        <span class="status-param-hud-title">ステータス</span>
+                        <button id="status-param-hud-toggle" class="status-param-hud-toggle" title="折りたたみ">▼</button>
+                    </div>
+                    <div id="status-param-hud-grid" class="status-param-hud-grid">
+                        <!-- updateStatusHUD() で動的描画 -->
+                    </div>
                 </div>
                 <div class="chat-history" id="chat-history">
                     <!-- Messages will be injected here -->
                 </div>
+                <!-- 💡 指示付き再生成モーダル -->
+                <div id="guided-regen-modal" class="guided-regen-modal hidden" role="dialog" aria-modal="true">
+                    <div class="guided-regen-content">
+                        <div class="guided-regen-header">
+                            <span class="guided-regen-title">💡 指示付き再生成</span>
+                            <button id="guided-regen-close" class="guided-regen-close" title="閉じる">✕</button>
+                        </div>
+                        <p class="guided-regen-hint">AIにどう書き直してほしいか指示してください。例:「ナナシは既にレポラの正体を知っている設定です」「もっと臆病な反応にして」</p>
+                        <div class="guided-regen-preview-label">直前の応答プレビュー:</div>
+                        <div id="guided-regen-preview" class="guided-regen-preview"></div>
+                        <textarea id="guided-regen-input" placeholder="AIへの指示を入力..." rows="4"></textarea>
+                        <div class="guided-regen-actions">
+                            <button id="guided-regen-cancel" class="secondary-btn">キャンセル</button>
+                            <button id="guided-regen-submit" class="primary-btn">指示で再生成</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- 📝 プレイヤーノート サイドパネル -->
+                <aside id="player-notes-panel" class="player-notes-panel hidden" aria-hidden="true">
+                    <div class="player-notes-header">
+                        <span class="player-notes-title">📝 Player Notes</span>
+                        <button id="player-notes-close" class="player-notes-close" title="閉じる">✕</button>
+                    </div>
+                    <div class="player-notes-tabs">
+                        <button class="player-notes-tab active" data-scope="global" title="全チャット・全クエストで常に適用">🌐 Global</button>
+                        <button class="player-notes-tab" data-scope="quest" title="アクティブクエスト進行中のみ適用">🎯 Quest</button>
+                    </div>
+                    <div class="player-notes-body">
+                        <div id="player-notes-global-section" class="player-notes-section">
+                            <p class="player-notes-hint">常に system prompt に注入されるグローバルノート。世界観や行動指針、記憶の補完などに使用。</p>
+                            <textarea id="player-notes-global-text" placeholder="例: キャラ2は過去に{{user}}と出会ったことがある。&#10;プレイヤーは臆病だが危機では強い信念を持つ。"></textarea>
+                            <div class="player-notes-meta">
+                                <span id="player-notes-global-count">0 / 4000 字</span>
+                            </div>
+                        </div>
+                        <div id="player-notes-quest-section" class="player-notes-section hidden">
+                            <p class="player-notes-hint">アクティブなクエスト中のみ注入されるクエスト固有ノート。クエスト特有の記憶矛盾の修正などに使用。</p>
+                            <textarea id="player-notes-quest-text" placeholder="このクエスト固有の補足を書いてください。&#10;クエスト未開始時は使えません。" disabled></textarea>
+                            <div class="player-notes-meta">
+                                <span id="player-notes-quest-count">0 / 4000 字</span>
+                                <span id="player-notes-quest-status" class="player-notes-status"></span>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+                <!-- 📊 Info Panel (Telelynx式・状況サマリ) — 初期非表示 -->
+                <div id="info-panel" class="info-panel hidden">
+                    <div class="info-panel-header">
+                        <span class="info-panel-title">📊 INFO</span>
+                        <div class="info-panel-actions">
+                            <button id="info-panel-refresh" class="info-panel-icon-btn" title="情報を手動再生成">⟳</button>
+                            <button id="info-panel-collapse" class="info-panel-icon-btn" title="折りたたみ／展開">▼</button>
+                        </div>
+                    </div>
+                    <div id="info-panel-body" class="info-panel-body">
+                        <span class="info-panel-empty">情報はまだありません。次のAI応答で更新されます。</span>
+                    </div>
+                </div>
                 <div class="chat-input-area">
-                    <textarea id="chat-input" placeholder="メッセージを入力... (Enterで送信, Shift+Enterで改行)"></textarea>
-                    <button id="banter-btn" title="パーティメンバー同士の掛け合い">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                    </button>
-                    <button id="export-chat-btn" title="チャットログをHTMLでエクスポート">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    </button>
-                    <button id="send-btn">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-                    </button>
+                    <!-- 上段ツールバー: ファイル操作 / AI挙動トグル -->
+                    <div class="chat-toolbar">
+                        <!-- グループ1: セッション操作 -->
+                        <div class="toolbar-group">
+                            <button id="export-chat-btn" title="チャットログをHTMLでエクスポート">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            </button>
+                            <button id="save-session-btn" title="セッションをJSONで保存">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                            </button>
+                            <label id="load-session-label" title="セーブデータをロード">
+                                <input type="file" id="load-session-file" accept=".json" hidden>
+                                <span id="load-session-btn">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                </span>
+                            </label>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <!-- グループ2: プレイヤーノート -->
+                        <div class="toolbar-group">
+                            <button id="player-notes-toggle" title="プレイヤーノート（📝 システムプロンプトに注入される補足メモ）">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+                            </button>
+                        </div>
+                        <!-- グループ3: AI挙動トグル -->
+                        <div class="toolbar-group">
+                            <!-- 応答長プリセット: S(短め) / M(標準) / L(詳細) -->
+                            <div id="response-length-group" class="response-length-group" title="AI応答の長さ: S(短め) / M(標準) / L(詳細)">
+                                <button class="resp-len-btn" data-length="short" title="短め: 2〜4文。展開優先">S</button>
+                                <button class="resp-len-btn" data-length="medium" title="標準: 1〜3段落。バランス型">M</button>
+                                <button class="resp-len-btn" data-length="long" title="詳細: 4段落以上。情景・感情を丁寧に">L</button>
+                            </div>
+                            <!-- 末尾選択肢生成モード（Telelynx式） -->
+                            <button id="show-choices-toggle" title="末尾選択肢モード: AIが各応答末尾にプレイヤー行動候補を3つ提案します（ON/OFFトグル）">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                            </button>
+                            <!-- Info Panel トグル（Telelynx式・状況サマリ） -->
+                            <button id="info-panel-toggle" title="Info Panel: AIが各応答に【現在の状況】【ユーザー情報】【登場キャラ】等の状況サマリを生成（ON/OFFトグル）">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+                            </button>
+                            <!-- 自動音声読み上げトグル (TTS) -->
+                            <button id="autoplay-tts-toggle" title="自動音声読み上げ: AI発言時に自動でボイスを再生（ON/OFFトグル）">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- 下段: テキストエリア + RP操作 + 送信 -->
+                    <div class="chat-input-row">
+                        <textarea id="chat-input" placeholder="メッセージを入力... (Enterで送信, Shift+Enterで改行)"></textarea>
+                        <button id="banter-btn" title="パーティメンバー同士の掛け合い">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                        </button>
+                        <button id="player-narrate-btn" title="プレイヤーナレーションモード（ON/OFFトグル）">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        </button>
+                        <button id="narrator-btn" title="ナレーションを挿入（LLM生成）" style="display:none;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                        </button>
+                        <!-- 🎲 ダイスロールポップオーバー -->
+                        <div id="dice-popover" class="dice-popover hidden">
+                            <button class="dice-face-btn" data-notation="1d4">D4</button>
+                            <button class="dice-face-btn" data-notation="1d6">D6</button>
+                            <button class="dice-face-btn" data-notation="1d8">D8</button>
+                            <button class="dice-face-btn" data-notation="1d10">D10</button>
+                            <button class="dice-face-btn" data-notation="1d12">D12</button>
+                            <button class="dice-face-btn" data-notation="1d20">D20</button>
+                            <button class="dice-face-btn" data-notation="1d100">D100</button>
+                            <input id="dice-custom-input" type="text" placeholder="例: 2d6" maxlength="6">
+                            <button id="dice-custom-roll-btn">Roll</button>
+                        </div>
+                        <button id="dice-btn" title="ダイスロール (/roll NdX でも入力可)" style="display:none">🎲</button>
+                        <button id="web-search-toggle-btn" title="次回送信で強制検索（OFF）" style="display:none;">🔍</button>
+                        <button id="imggen-btn" title="シーン画像を生成 (Shift+クリックで手動プロンプト)" style="display:none;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        </button>
+                        <button id="send-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -106,9 +248,7 @@
                 <h2>Character Edit <span class="panel-subtitle">(キャラクター編集)</span></h2>
                 <div class="slot-tabs" id="edit-tabs">
                     <div class="slot-tab active" data-edit-target="player">Player</div>
-                    <div class="slot-tab" data-edit-target="0">Slot 1</div>
-                    <div class="slot-tab" data-edit-target="1">Slot 2</div>
-                    <div class="slot-tab" data-edit-target="2">Slot 3</div>
+                    <!-- Slot 1〜N タブは main.js の renderEditTabs() で動的注入される -->
                 </div>
                 <div id="slot-avatar-preview" class="slot-avatar-preview"></div>
                 <div class="form-group">
@@ -138,6 +278,43 @@
                 <div class="form-group">
                     <label>Sample Dialogue (セリフ例)</label>
                     <textarea id="edit-char-examples" rows="4"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>SD Visual Prompt <span class="hint-inline">(Stable Diffusion 外見プロンプト・英語推奨)</span></label>
+                    <textarea id="edit-char-sd-prompt" rows="3" placeholder="1girl, silver hair, red eyes, maid dress, ..."></textarea>
+                    <div class="hint">キャラの外見をSD向け英語タグで記述。空欄の場合は Description の [外見] セクションにフォールバック。</div>
+                </div>
+
+                <!-- Voice (TTS) Settings -->
+                <div class="form-group">
+                    <label>Voice (TTS) Settings <span class="hint-inline">(音声読み上げ設定)</span></label>
+                    <div class="flex-row" style="gap: 8px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 150px;">
+                            <label class="hint-inline" style="margin-left:0; font-weight:600;">Engine</label>
+                            <select id="edit-char-voice-engine" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: #fff; border-radius: 8px; outline:none;">
+                                <option value="none">音声なし</option>
+                                <option value="webspeech">Web Speech (ブラウザ標準)</option>
+                                <option value="voicevox">VOICEVOX (ローカル)</option>
+                            </select>
+                        </div>
+                        <div style="flex: 2; min-width: 200px;">
+                            <label class="hint-inline" style="margin-left:0; font-weight:600;">Voice / Speaker</label>
+                            <select id="edit-char-voice-speaker" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: #fff; border-radius: 8px; outline:none;">
+                                <option value="">選択してください</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="flex-row" style="gap: 16px; margin-top: 8px;">
+                        <div style="flex: 1; display:flex; flex-direction:column; gap:4px;">
+                            <label class="hint-inline" style="margin-left:0; font-weight:600;">Pitch (ピッチ: 0.5 ~ 2.0)</label>
+                            <input type="number" id="edit-char-voice-pitch" min="0.5" max="2.0" step="0.1" value="1.0" style="padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: #fff; border-radius: 8px; outline:none;">
+                        </div>
+                        <div style="flex: 1; display:flex; flex-direction:column; gap:4px;">
+                            <label class="hint-inline" style="margin-left:0; font-weight:600;">Speed (速度: 0.5 ~ 2.0)</label>
+                            <input type="number" id="edit-char-voice-speed" min="0.5" max="2.0" step="0.1" value="1.0" style="padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: #fff; border-radius: 8px; outline:none;">
+                        </div>
+                    </div>
+                    <div class="hint">※ VOICEVOX を利用する場合は、PC上でVOICEVOXアプリが起動している必要があります（デフォルト: ポート50021）。</div>
                 </div>
 
                 <!-- Lorebook (per-character) -->
@@ -219,6 +396,9 @@
                             <label>推奨パーティ人数</label>
                             <input type="number" id="quest-party-size" min="1" max="3" value="2">
                         </div>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="quest-dice-enabled"> ダイスロール機能を有効化（TRPG判定）</label>
+                        </div>
                     </div>
 
                     <!-- Selection Text -->
@@ -288,6 +468,14 @@
                         <button id="add-item-clue-btn" class="secondary-btn">+ アイテム/手がかりを追加</button>
                     </div>
 
+                    <!-- Status Parameters (per-character) -->
+                    <div class="editor-panel">
+                        <h3 class="sub-section-title">ステータスパラメーター（キャラクター個別）</h3>
+                        <p class="hint">キャラクターごとに異なるパラメーターを設定できます。パラメーターはAIの応答に応じて1往復ごとに変動し、チャット画面のHUDとキャラ名の横に表示されます。</p>
+                        <div id="quest-char-status-params" class="char-status-params-list"></div>
+                        <button id="add-char-status-btn" class="secondary-btn" style="margin-top: 0.5rem;">+ キャラクターを追加</button>
+                    </div>
+
                     <!-- Introduction Dialogue -->
                     <div class="editor-panel">
                         <h3 class="sub-section-title">導入会話 (オプション)</h3>
@@ -308,6 +496,13 @@
         <!-- Settings View -->
         <div class="settings-container view-section hidden" id="settings-view">
             <div class="settings-panel">
+                <div id="settings-accordion-controls">
+                    <button id="save-settings-btn" class="primary-btn" style="padding:8px 20px;">💾 Save Settings</button>
+                    <div style="display:flex; gap:0.5rem; margin-left:auto;">
+                        <button type="button" id="settings-expand-all-btn" class="secondary-btn" style="padding:4px 10px; font-size:0.85rem;">すべて展開</button>
+                        <button type="button" id="settings-collapse-all-btn" class="secondary-btn" style="padding:4px 10px; font-size:0.85rem;">すべて折りたたみ</button>
+                    </div>
+                </div>
                 <h2>API Settings</h2>
                 <div class="form-group">
                     <label>API Endpoint (OpenAI Compatible)</label>
@@ -326,10 +521,358 @@
                     <label>Max Tokens</label>
                     <input type="number" id="api-tokens" placeholder="1000" value="1000">
                 </div>
-                <button id="save-settings-btn" class="primary-btn">Save Settings</button>
+                <div class="form-group">
+                    <label>API Timeout (秒)</label>
+                    <input type="number" id="api-timeout" placeholder="180" value="180" min="0">
+                    <div class="hint">LLMバックエンドが応答しない場合に自動でリクエストを中断する秒数。0でタイムアウト無効。長時間生成する場合は300〜600推奨。</div>
+                </div>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>🌍 完全自由空間モード <span class="panel-subtitle">(Free World Mode)</span></h2>
+                <p class="hint" style="margin-bottom: 1rem;">「キャラぷ」の完全自由空間に着想を得た 4 機能セット。シミュレーション型 RP 向け。<br>親トグルが OFF の場合、サブ設定はすべて無視されます。</p>
+
+                <div class="form-group">
+                    <label><input type="checkbox" id="free-world-enabled"> 🌍 <strong>完全自由空間モードを有効にする</strong>（親トグル）</label>
+                </div>
+
+                <div class="form-group">
+                    <label><input type="checkbox" id="mary-sue-prevention"> 🛡️ メアリー・スー防止</label>
+                    <div class="hint">プレイヤーが過剰に強くなるのを抑制。原作住人より弱いか同等として扱う</div>
+                </div>
+                <div class="form-group" style="margin-left: 1.5rem; padding-left: 0.75rem; border-left: 2px solid rgba(255,180,80,0.3);">
+                    <label><input type="checkbox" id="cheat-mode"> ⚡ チートモード（Mary Sue 防止を強制無効化）</label>
+                    <div class="hint">ON にすると Mary Sue 防止トグルの状態に関係なく、無双・最強キャラ演出を許可します。「最初から最強でやりたい」プレイ向け。</div>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="realism-mode"> ✨ リアル判定モード</label>
+                    <div class="hint">緊張・疲労・経験不足を行動結果に反映。「思い通りにならないもどかしさ」を演出</div>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="npc-generation-enabled"> 🤝 NPC 自動生成</label>
+                    <div class="hint">Party Setup の空スロットに ➕ Generate NPC ボタンが出現。LLM が世界観に合う NPC を生成</div>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="living-world-enabled"> 🌍 生きている世界（アイドルイベント）</label>
+                    <div class="hint">ユーザー操作なしでも世界が動く。LLM を背景で呼ぶため API コール頻度に注意</div>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="universe-report-enabled" checked> 📋 Universe Report（初回確認）</label>
+                    <div class="hint">初回のテンプレ入力（#世界観 / #user設定 / #初期状況）に対し、AI が世界観の理解度・確認事項を返してから本編開始。原作にない独自能力や設定ズレを早期発見</div>
+                </div>
+                <div class="form-group">
+                    <label>アイドルイベント最低間隔 (秒)</label>
+                    <input type="number" id="living-world-interval" min="60" max="600" value="300">
+                    <div class="hint">60〜600 秒。短いほど API コール増加。推奨 300（5分）</div>
+                </div>
+                <div class="form-group">
+                    <label>世界観テンプレ (NPC 生成のフォールバック)</label>
+                    <textarea id="world-theme" rows="3" placeholder="例: 中世ファンタジー世界。剣と魔法と精霊が当たり前に存在する街。" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); padding: 12px; border-radius: 8px; font-family: inherit; resize: vertical;"></textarea>
+                    <div class="hint">クエストの additional_settings が優先。空欄なら「現代日本の日常」</div>
+                </div>
+                <p class="hint" style="background: rgba(124, 77, 255, 0.08); padding: 0.75rem; border-radius: 8px; border-left: 3px solid var(--accent-color);">📦 サンプルクエスト <code>sample_quest_free_world.json</code> （<code>public/</code> 配下）を Quest Editor のインポートで読み込むと、初期設定ガイド付きで遊び始められます。</p>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>🔍 Web Search</h2>
+                <p class="hint" style="margin-bottom: 1rem;">ロールプレイ中の事実確認・最新情報取得用。AI が裏で検索し system prompt に注入。<br>RP の没入感を保ったまま、最新情報・実在の場所・作品設定などを補強します。</p>
+
+                <div class="form-group">
+                    <label><input type="checkbox" id="web-search-enabled"> 🔍 <strong>Web Search を有効にする</strong></label>
+                </div>
+                <div class="form-group">
+                    <label>プロバイダー</label>
+                    <select id="web-search-provider">
+                        <option value="auto">Auto (Tavily キーあれば優先、なければ DuckDuckGo)</option>
+                        <option value="tavily">Tavily のみ</option>
+                        <option value="ddg">DuckDuckGo のみ</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Tavily API Key (空欄なら DDG のみ動作)</label>
+                    <input type="password" id="tavily-api-key" placeholder="tvly-...">
+                    <div class="hint"><a href="https://tavily.com" target="_blank" rel="noopener">tavily.com</a> で月1000回無料。LLM向け要約済み結果が返るため精度高い</div>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="web-search-auto-trigger" checked> 自動判定（キーワードで発動）</label>
+                    <div class="hint">「最新の」「ニュース」「〜って何」等で自動検索。OFF 時は <code>[search:〜]</code> と 🔍 ボタンのみ</div>
+                </div>
+                <div class="form-group">
+                    <label>クールダウン (秒)</label>
+                    <input type="number" id="web-search-cooldown" min="0" max="300" value="10" style="width:120px;">
+                    <div class="hint">連続検索の最低間隔。同一クエリは1時間キャッシュ</div>
+                </div>
+                <div class="form-group">
+                    <label>結果数上限</label>
+                    <input type="number" id="web-search-max-results" min="1" max="10" value="5" style="width:120px;">
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="web-search-show-debug"> デバッグ表示（バッジクリックで結果JSON展開）</label>
+                </div>
+                <p class="hint" style="background: rgba(76, 175, 80, 0.08); padding: 0.75rem; border-radius: 8px; border-left: 3px solid #4caf50;">
+                💡 使い方:<br>
+                ・チャット欄の 🔍 ボタンで次回送信を強制検索<br>
+                ・メッセージ内に <code>[search:クエリ]</code> を含めると明示検索（RP本文中に埋め込んでもOK）<br>
+                ・自動判定 ON なら「最新のニュース教えて」等で勝手に発動
+                </p>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>📝 AI Memo (継続記憶)</h2>
+                <p class="hint" style="margin-bottom: 1rem;">AI が応答内に <code>[MEMO: 内容]</code> タグを書くと、自動的にこのメモに追加されます（タグ自体はユーザー表示時には除去）。<br>メモは次回以降の system prompt に注入され、AI が継続的に参照します。検索結果の核心・NPC の素性・伏線などの長期記憶に最適。</p>
+
+                <div class="form-group">
+                    <label><input type="checkbox" id="ai-memo-enabled"> 📝 <strong>AI Memo を有効にする</strong></label>
+                </div>
+                <div class="form-group">
+                    <label>メモ内容 (1行 = 1エントリ、編集可能)　現在 <span id="ai-memo-count">0</span> 件</label>
+                    <textarea id="ai-memo-textarea" rows="10" placeholder="AI が [MEMO: 〜] で書いたメモがここに自動追加されます。手動編集も可能。" style="width:100%; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text-primary); padding:12px; border-radius:8px; font-family:inherit; resize:vertical; font-size:0.9rem;"></textarea>
+                </div>
+                <div class="form-group" style="display:flex; gap:0.5rem;">
+                    <button type="button" id="ai-memo-save-btn" class="primary-btn" style="padding:6px 14px;">💾 メモを保存</button>
+                    <button type="button" id="ai-memo-clear-btn" class="secondary-btn" style="padding:6px 14px;">🗑 全削除</button>
+                </div>
+                <p class="hint" style="background: rgba(124, 77, 255, 0.08); padding: 0.75rem; border-radius: 8px; border-left: 3px solid var(--accent-color);">
+                💡 使い方:<br>
+                ・AI 応答に <code>[MEMO: ハルは元教師]</code> のように書くと自動保存<br>
+                ・直近 30 件が system prompt に注入される（上限 200 件、古いものから削除）<br>
+                ・Web Search ON 時は、AI に「重要情報を [MEMO:] で記録せよ」と自動指示
+                </p>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>🎭 ペルソナ・モード</h2>
+                <p class="hint" style="margin-bottom: 1rem;">{{user}}（プレイヤー）が<strong>同一人物のまま複数の顔</strong>を使い分ける場合の AI 混同対策。<br>呼称・一人称（私／僕など）でペルソナを自動判別し、AI が顔の違いを理解して応答します。<br>※「別キャラへの完全切替」は自動で別人として扱われます（この機能とは別系統）。</p>
+
+                <div class="form-group">
+                    <label><input type="checkbox" id="persona-mode-enabled"> 🎭 <strong>ペルソナ・モードを有効にする</strong></label>
+                </div>
+                <div class="form-group">
+                    <label>ペルソナ定義（1行 = 1ペルソナ、任意）</label>
+                    <textarea id="persona-definitions" rows="6" placeholder="例:&#10;私 = 先生モード（落ち着いた大人の口調。敬語混じり）&#10;僕 = 男性モード（一人の男性としての素の表情）&#10;「春姉さん」と呼ばれたら = 優しいお姉さんモード" style="width:100%; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text-primary); padding:12px; border-radius:8px; font-family:inherit; resize:vertical; font-size:0.9rem;"></textarea>
+                    <div class="hint">空欄でも動作します（AI が一人称・呼称から自動推測）。書いておくと精度が上がります</div>
+                </div>
+                <p class="hint" style="background: rgba(124, 77, 255, 0.08); padding: 0.75rem; border-radius: 8px; border-left: 3px solid var(--accent-color);">
+                📋 適用される 4 ルール（system prompt に自動注入）:<br>
+                ① <strong>一人称・呼称で自動判別</strong> — 私／僕、キャラへの呼び方の変化でペルソナ切替を検知<br>
+                ② <strong>1メッセージ内はペルソナ固定</strong> — 途中で呼び方が変わっても冒頭のペルソナを維持（混乱防止）<br>
+                ③ <strong>地の文トーン統一</strong> — 差はセリフ・態度に留め、ナレーションの文体は一定<br>
+                ④ <strong>明示タグ優先</strong> — <code>[春姉さん] おはよう</code> のように冒頭で書けば確実
+                </p>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>👥 NPC 発言保証</h2>
+                <p class="hint" style="margin-bottom: 1rem;">複数 NPC がいるとき、行動シーンで脇の NPC が棒立ち・無視されるのを防ぎます。<br>全員ではなく<strong>シーン中心の数人だけ</strong>に最低一言を促すため、コンテキスト負荷は最小限。最大20人編成でも安全。</p>
+
+                <div class="form-group">
+                    <label><input type="checkbox" id="npc-min-dialogue-enabled"> 👥 <strong>NPC 発言保証を有効にする</strong></label>
+                    <div class="hint">複数キャラ構成（2人以上）のときのみ実効。掛け合い（Banter）モードでは無効</div>
+                </div>
+                <div class="form-group">
+                    <label>1ターンで喋らせる中心 NPC の上限</label>
+                    <input type="number" id="npc-dialogue-max" min="1" max="6" value="3" style="width:120px;">
+                    <div class="hint">1〜6人。少ないほどコンテキスト軽量・テンポ重視。多いほど賑やかだが重い（推奨 2〜3）</div>
+                </div>
+                <p class="hint" style="background: rgba(76, 175, 80, 0.08); padding: 0.75rem; border-radius: 8px; border-left: 3px solid #4caf50;">
+                💡 仕組み: 「登録NPCは全員出さなくてよい。シーンに関わる最大N人だけ最低一言喋らせ、無関係なNPCは登場も言及もしない」と AI に指示します。<br>
+                これにより<strong>20人いても毎ターン重くならず</strong>、かつ目の前の数人が無言になる問題も防げます。
+                </p>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>🎙️ ナレーター音声 (TTS)</h2>
+                <p class="hint" style="margin-bottom: 1rem;">ナレーション吹き出しの自動読み上げ用音声を設定します。<br>キャラクターごとの voice 設定とは別管理。⚠️ チャット欄の🔊トグル ON 必須。</p>
+
+                <div id="voicevox-status" class="form-group" style="background: rgba(0,0,0,0.2); padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.85rem;">
+                    <strong>VOICEVOX 接続状態:</strong> <span id="voicevox-status-text" style="color: var(--text-secondary);">未確認</span>
+                    <button id="voicevox-recheck-btn" type="button" class="secondary-btn" style="margin-left: 0.5rem; padding: 4px 10px; font-size: 0.8rem;">再確認</button>
+                </div>
+
+                <div class="form-group">
+                    <label>エンジン</label>
+                    <select id="narrator-voice-engine">
+                        <option value="none">読み上げなし</option>
+                        <option value="webspeech">Web Speech API (ブラウザ標準)</option>
+                        <option value="voicevox">VOICEVOX (ローカル http://localhost:50021)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>スピーカー</label>
+                    <select id="narrator-voice-speaker" disabled>
+                        <option value="">エンジンを選択してください</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>ピッチ (0.5〜2.0)</label>
+                    <input type="number" id="narrator-voice-pitch" min="0.5" max="2.0" step="0.05" value="1.0" style="width:120px;">
+                </div>
+                <div class="form-group">
+                    <label>速度 (0.5〜2.0)</label>
+                    <input type="number" id="narrator-voice-speed" min="0.5" max="2.0" step="0.05" value="1.0" style="width:120px;">
+                </div>
+                <div class="form-group">
+                    <button id="narrator-voice-test-btn" type="button" class="secondary-btn" style="padding: 8px 18px;">🔊 テスト再生</button>
+                    <div class="hint">現在の設定値で「テスト再生です。聞こえますか？」を読み上げ。保存前でも動作します。エラー時は詳細を表示。</div>
+                </div>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>Image Generation (SD API)</h2>
+                <div class="form-group">
+                    <label><input type="checkbox" id="sd-enabled"> 画像生成を有効にする</label>
+                </div>
+                <div class="form-group">
+                    <label>SD API Endpoint</label>
+                    <input type="text" id="sd-endpoint" placeholder="http://localhost:5001">
+                    <div class="hint">KoboldCPPの場合は --sdmodel オプション付きで起動し、同じエンドポイントを指定</div>
+                </div>
+                <div class="form-group">
+                    <label>Image Size</label>
+                    <div class="flex-row" style="gap: 8px; align-items: center;">
+                        <input type="number" id="sd-width" placeholder="512" style="width:80px;">
+                        <span style="color: var(--text-secondary);">x</span>
+                        <input type="number" id="sd-height" placeholder="512" style="width:80px;">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Steps</label>
+                    <input type="number" id="sd-steps" placeholder="20" style="width:100px;">
+                </div>
+                <div class="form-group">
+                    <label>CFG Scale</label>
+                    <input type="number" id="sd-cfg-scale" placeholder="7" step="0.5" style="width:100px;">
+                </div>
+                <div class="form-group">
+                    <label>Sampler</label>
+                    <input type="text" id="sd-sampler" placeholder="Euler a">
+                </div>
+                <div class="form-group">
+                    <label>Positive Prompt Prefix (クオリティタグ等)</label>
+                    <textarea id="sd-prompt-prefix" rows="2" placeholder="score_9, score_8_up, score_7_up, masterpiece, best quality"></textarea>
+                    <div class="hint">生成プロンプトの前に自動追加（WAI-illustrious等のスコアタグはここに）</div>
+                </div>
+                <div class="form-group">
+                    <label>Negative Prompt</label>
+                    <textarea id="sd-negative-prompt" rows="2" placeholder="lowres, bad anatomy, bad hands, text, error, worst quality, low quality, blurry"></textarea>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="sd-allow-nsfw"> NSFWコンテンツを許可（プロンプト生成の指示に反映）</label>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="sd-auto-generate"> 返答ごとに自動で画像を生成</label>
+                </div>
+                <hr style="border-color: rgba(255,255,255,0.08); margin: 1.5rem 0;">
+                <div class="form-group">
+                    <label style="color: var(--accent-color); font-weight: 600; font-size: 0.95rem;">画像生成モード</label>
+                    <div class="hint" style="margin: 6px 0 10px;">
+                        プロンプト生成時のキャラクター描写方法を切り替えます。<br>
+                        <b>Auto</b>: パーティー人数に応じて自動（2人以上で複数キャラモード）<br>
+                        <b>複数キャラ</b>: 常に構図タグ＋BREAK構文で複数キャラを描写<br>
+                        <b>シーン描写</b>: 構図タグやBREAKを使わず、シンプルなシーン描写プロンプトを生成
+                    </div>
+                    <select id="sd-imggen-mode" style="max-width: 280px;">
+                        <option value="auto">Auto（自動判定）</option>
+                        <option value="multi">複数キャラクター（構図タグ + BREAK）</option>
+                        <option value="scene">シーン描写（構図タグなし）</option>
+                    </select>
+                </div>
+                <hr style="border-color: rgba(255,255,255,0.08); margin: 1.5rem 0;">
+                <div class="form-group">
+                    <label style="color: var(--accent-color); font-weight: 600; font-size: 0.95rem;">Forge Couple 設定</label>
+                    <div class="hint" style="margin: 6px 0 10px;">
+                        外部Forge WebUI（別セル起動）を使用した複数キャラの空間分離機能。
+                        SDエンドポイントをForgeのURLに変更した上で有効にしてください。
+                    </div>
+                    <label><input type="checkbox" id="sd-forge-couple"> Forge Couple モードを使用（BREAKセグメントを空間領域に割り当て）</label>
+                </div>
+                <div class="flex-row" style="gap: 8px;">
+                    <button id="save-sd-btn" class="primary-btn">Save SD Settings</button>
+                    <button id="test-sd-btn" class="secondary-btn">Test Connection</button>
+                </div>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>Narrator（ナレーター）</h2>
+                <div class="hint" style="margin-bottom: 1rem;">
+                    パーティースロットとは独立した三人称ナレーターです。📖ボタンを押すと現在のシーンを地の文で描写します。
+                    ナレーションは他キャラのLLMコンテキストに「場面描写」として渡されますが、ナレーター自身はキャラクターとして応答しません。
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="narrator-enabled"> ナレーターを有効にする</label>
+                </div>
+                <div class="form-group">
+                    <label>ナレーター名</label>
+                    <input type="text" id="narrator-name" placeholder="ナレーター" style="max-width: 200px;">
+                </div>
+                <div class="form-group">
+                    <label>ナレーションスタイル（LLMへのシステム指示）</label>
+                    <textarea id="narrator-style" rows="4" placeholder="三人称の全知ナレーターとして..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="narrator-auto-trigger"> 返答ごとに自動でナレーションを挿入</label>
+                </div>
+                <div class="form-group">
+                    <label>ナレーション最大トークン数</label>
+                    <input type="number" id="narrator-max-tokens" value="400" min="100" max="1200" style="max-width: 120px;">
+                </div>
+                <button id="save-narrator-btn" class="primary-btn">Save Narrator Settings</button>
             </div>
         </div>
     </main>
+
+    <!-- Avatar Crop Modal -->
+    <div id="avatar-crop-modal" class="modal-overlay hidden">
+        <div class="modal-dialog avatar-crop-dialog">
+            <h3 class="modal-title">🖼️ アイコンを調整</h3>
+            <div class="crop-canvas-wrap">
+                <canvas id="crop-canvas" width="360" height="360"></canvas>
+            </div>
+            <div class="crop-controls">
+                <label class="crop-zoom-label">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                </label>
+                <input type="range" id="crop-zoom" min="0.05" max="5" step="0.01" value="1" style="flex:1;">
+                <label class="crop-zoom-label">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                </label>
+            </div>
+            <div class="hint" style="text-align:center; margin: 6px 0 0;">ドラッグで位置調整 / スライダーでズーム</div>
+            <div class="modal-actions">
+                <button id="crop-confirm-btn" class="primary-btn">確定</button>
+                <button id="crop-reset-btn" class="secondary-btn">リセット</button>
+                <button id="crop-cancel-btn" class="secondary-btn">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 💬 Banter Member Select Modal -->
+    <div id="banter-select-modal" class="modal-overlay hidden">
+        <div class="modal-dialog">
+            <h3 class="modal-title">💬 掛け合いメンバーを選択</h3>
+            <p class="hint" style="margin: -0.5rem 0 0;">2〜4人を選んでください（チェックボックス）</p>
+            <div id="banter-member-list" class="banter-member-list"></div>
+            <div id="banter-include-player-row" class="banter-player-row">
+                <label><input type="checkbox" id="banter-include-player"> プレイヤーも参加させる（{{user}}を含む全員参加モード）</label>
+            </div>
+            <div class="modal-actions">
+                <button id="banter-confirm-btn" class="primary-btn">この組み合わせで生成</button>
+                <button id="banter-cancel-btn" class="secondary-btn">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prompt Edit Modal -->
+    <div id="prompt-edit-modal" class="modal-overlay hidden">
+        <div class="modal-dialog">
+            <h3 class="modal-title">✏️ プロンプトを編集</h3>
+            <textarea id="prompt-edit-textarea" rows="8" placeholder="Stable Diffusion プロンプト（英語推奨）"></textarea>
+            <div class="modal-actions">
+                <button id="prompt-edit-generate-btn" class="primary-btn">生成</button>
+                <button id="prompt-edit-cancel-btn" class="secondary-btn">キャンセル</button>
+            </div>
+        </div>
+    </div>
 
     <script type="module" src="./src/main.js"></script>
 </body>
