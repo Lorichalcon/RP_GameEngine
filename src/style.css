@@ -100,6 +100,36 @@ aside {
   border: 1px solid var(--accent-color);
 }
 
+/* nav アイコン + 2段ラベル */
+.nav-icon {
+  font-size: 1.05rem;
+  width: 1.5em;
+  text-align: center;
+  flex-shrink: 0;
+}
+.nav-labels {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+}
+.nav-label {
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.nav-sublabel {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  opacity: 0.65;
+  white-space: nowrap;
+}
+.nav-item:hover .nav-sublabel,
+.nav-item.active .nav-sublabel {
+  color: #fff;
+  opacity: 0.8;
+}
+
 .nav-spacer {
   flex: 1;
 }
@@ -3016,3 +3046,60 @@ main {
   margin: 0 !important;
   pointer-events: none;
 }
+
+/* ======== トグルボタン ON 統一インジケーター ======== */
+/* どのトグルが有効か一目で分かる緑ドット（右上） */
+#player-notes-toggle,
+#show-choices-toggle,
+#info-panel-toggle,
+#autoplay-tts-toggle,
+#player-narrate-btn,
+#web-search-toggle-btn,
+.resp-len-btn {
+  position: relative;
+}
+#player-notes-toggle.active::after,
+#show-choices-toggle.active::after,
+#info-panel-toggle.active::after,
+#autoplay-tts-toggle.active::after,
+#player-narrate-btn.active::after,
+#web-search-toggle-btn.active::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4caf50;
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.9);
+  pointer-events: none;
+}
+
+/* ======== Toast 通知 ======== */
+#app-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: rgba(30, 32, 48, 0.95);
+  color: #fff;
+  padding: 10px 22px;
+  border-radius: 10px;
+  border-left: 3px solid #4caf50;
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  z-index: 9999;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+#app-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+#app-toast[data-type="error"] { border-left-color: #f44336; }
+#app-toast[data-type="info"]  { border-left-color: #42a5f5; }

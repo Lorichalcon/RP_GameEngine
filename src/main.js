@@ -1539,6 +1539,19 @@ function setupNavigation() {
         });
     });
 
+    // Alt+1〜7 でビュー高速切替（入力中でも Alt 併用なので誤爆しない）
+    const viewOrder = ['character-view', 'chat-view', 'party-set-view', 'char-edit-view', 'quest-view', 'lore-view', 'settings-view'];
+    document.addEventListener('keydown', function(e) {
+        if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        const idx = parseInt(e.key, 10) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= viewOrder.length) return;
+        const target = document.querySelector('.nav-item[data-view="' + viewOrder[idx] + '"]');
+        if (target) {
+            e.preventDefault();
+            target.click();
+        }
+    });
+
     // Reset Chat Button
     const resetBtn = document.getElementById('reset-chat-btn');
     if (resetBtn) {
@@ -1559,6 +1572,22 @@ function setupNavigation() {
             }
         });
     }
+}
+
+// ---- Toast 通知（alert の非ブロッキング代替） ----
+let _toastTimer = null;
+function showToast(message, type) {
+    let el = document.getElementById('app-toast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'app-toast';
+        document.body.appendChild(el);
+    }
+    el.textContent = message;
+    el.dataset.type = type || 'success';
+    el.classList.add('visible');
+    if (_toastTimer) clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.remove('visible'), 2500);
 }
 
 // ---- Settings Accordion (各 h2 セクションを折り畳み可能にする) ----
@@ -1748,7 +1777,7 @@ function setupSettings() {
             aiMemoList = textToAiMemoList(aiMemoTextarea ? aiMemoTextarea.value : '');
             saveAiMemos();
             if (aiMemoCount) aiMemoCount.textContent = String(aiMemoList.length);
-            alert('AI Memo を保存しました（' + aiMemoList.length + ' 件）');
+            showToast('📝 AI Memo を保存しました（' + aiMemoList.length + ' 件）');
         });
     }
     if (aiMemoClearBtn && !aiMemoClearBtn._bound) {
@@ -1894,7 +1923,7 @@ function setupSettings() {
             if (aiMemoCount) aiMemoCount.textContent = String(aiMemoList.length);
         }
 
-        alert('Settings saved successfully!');
+        showToast('✅ Settings を保存しました');
     });
 }
 
@@ -3508,7 +3537,7 @@ function setupCharacterEdit() {
         saveCommonLoreBtn.addEventListener('click', function() {
             commonLorebook = getCommonLorebookFromEditor();
             localStorage.setItem('savedCommonLore', JSON.stringify(commonLorebook));
-            alert('Global Lorebook saved!');
+            showToast('📖 Global Lorebook を保存しました');
         });
     }
 
