@@ -186,6 +186,259 @@ async function _readSseStreamToText(response, abortCtrl) {
     return fullContent;
 }
 
+// ======== 音声入力 (Speech-to-Text) ========
+// Web Speech API（ブラウザ内蔵・無料）優先、ローカル Whisper サーバーへ切替可。
+// ハンズフリー連続聴取で、無音区間ごとに認識結果を入力欄へ「挿入のみ」する。
+// ⚠️ getUserMedia / SpeechRecognition は https または localhost でのみ動作する。
+let sttEnabled        = localStorage.getItem('sttEnabled') === '1';        // mic ボタン表示
+let sttEngine         = localStorage.getItem('sttEngine') || 'webspeech';  // 'webspeech' | 'whisper'
+let sttLang           = localStorage.getItem('sttLang') || 'ja-JP';
+let sttAutoSend       = localStorage.getItem('sttAutoSend') === '1';       // 既定 OFF（挿入のみ）
+let sttSilenceMs      = parseInt(localStorage.getItem('sttSilenceMs')) || 1500; // Whisper VAD 無音判定
+let whisperEndpoint   = localStorage.getItem('whisperEndpoint') || 'http://localhost:5001/v1/audio/transcriptions';
+let _sttActive        = false;  // ハンズフリー聴取中か
+let _recognition      = null;   // SpeechRecognition インスタンス（webspeech）
+let _whisperCtx       = null;   // { stream, recorder, audioCtx, analyser, ... }（whisper）
+
+// 認識結果を入力欄へ追記（挿入のみ。auto-send が ON なら送信もトリガー）
+function appendTranscriptToInput(text) {
+    const input = document.getElementById('chat-input');
+    if (!input || !text) return;
+    const sep = (input.value && !/\s$/.test(input.value)) ? ' ' : '';
+    input.value += sep + text;
+    input.dispatchEvent(new Event('input')); // textarea 高さ自動調整トリガー
+    if (sttAutoSend) {
+        const sendBtn = document.getElementById('send-btn');
+        if (sendBtn && !sendBtn.disabled) sendBtn.click();
+    }
+}
+
+// interim（認識途中）の灰色ライブ表示。textarea は汚さない。
+function updateSttInterim(text) {
+    const el = document.getElementById('stt-interim');
+    if (!el) return;
+    if (text && text.trim()) {
+        el.textContent = '🎤 ' + text;
+        el.style.display = '';
+    } else {
+        el.textContent = '';
+        el.style.display = 'none';
+    }
+}
+
+function updateSttMicBtnUI() {
+    const btn = document.getElementById('stt-mic-btn');
+    if (!btn) return;
+    btn.style.display = sttEnabled ? '' : 'none';
+    btn.classList.toggle('active', _sttActive);
+    btn.title = _sttActive ? '🎤 音声入力 ON（クリックで停止）' : '🎤 音声入力を開始';
+}
+
+function toggleSTT() { _sttActive ? stopSTT() : startSTT(); }
+
+function startSTT() {
+    if (_sttActive) return;
+    _sttActive = true;
+    updateSttMicBtnUI();
+    if (sttEngine === 'whisper') _startWhisperSTT();
+    else                        _startWebSpeechSTT();
+}
+
+function stopSTT() {
+    _sttActive = false;
+    if (_recognition) { try { _recognition.stop(); } catch (e) {} _recognition = null; }
+    if (_whisperCtx)  { _stopWhisperSTT(); }
+    updateSttInterim('');
+    updateSttMicBtnUI();
+}
+
+// ===== Web Speech 経路（ブラウザ内蔵・無音検出はエンジン任せ） =====
+function _startWebSpeechSTT() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+        showToast('このブラウザは音声入力に非対応です（Chrome / Edge 推奨）', 'error');
+        stopSTT();
+        return;
+    }
+    _recognition = new SR();
+    _recognition.lang = sttLang;
+    _recognition.continuous = true;
+    _recognition.interimResults = true;
+    _recognition.onresult = (e) => {
+        // TODO(echo): autoplayTts 再生中は AI の声を拾うため、将来 isPlayingTts 中は一時停止する
+        let interim = '', final = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+            const r = e.results[i];
+            if (r.isFinal) final += r[0].transcript;
+            else           interim += r[0].transcript;
+        }
+        if (final) appendTranscriptToInput(final.trim()); // 無音で確定 → 挿入
+        updateSttInterim(interim);
+    };
+    _recognition.onerror = (e) => {
+        console.warn('[STT] webspeech error:', e.error);
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+            showToast('マイク権限が拒否されています。ブラウザの設定でマイクを許可してください', 'error');
+            stopSTT();
+        } else if (e.error === 'network') {
+            showToast('音声認識にはネット接続が必要です（Web Speech は音声を Google へ送信）', 'error');
+            stopSTT();
+        }
+        // 'no-speech' / 'aborted' 等は onend の自動再開に任せる
+    };
+    _recognition.onend = () => {
+        // continuous でも無音で勝手に終了する実装があるため、active の間は再開してハンズフリー継続
+        if (_sttActive && _recognition) {
+            try { _recognition.start(); } catch (e) { /* 連続 start の例外は無視 */ }
+        }
+    };
+    try {
+        _recognition.start();
+        showToast('🎤 音声入力 ON（話すと入力欄に文字が入ります）');
+    } catch (e) {
+        showToast('音声認識を開始できません: ' + e.message, 'error');
+        stopSTT();
+    }
+}
+
+// ===== Whisper 経路（クライアント VAD で無音検出 → セグメントを POST） =====
+async function _startWhisperSTT() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('このブラウザ/接続ではマイクを使用できません（https か localhost が必要）', 'error');
+        stopSTT();
+        return;
+    }
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+        showToast('マイクにアクセスできません: ' + e.message, 'error');
+        stopSTT();
+        return;
+    }
+    if (!_sttActive) { stream.getTracks().forEach(t => t.stop()); return; } // 起動中に停止された
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+
+    let recorder = null;
+    let chunks = [];
+    let speaking = false;
+    let silenceStart = 0;
+    let vadTimer = null;
+    const SILENCE_RMS = 0.012; // 無音とみなす RMS しきい値（経験値）
+
+    const startSegment = () => {
+        chunks = [];
+        try {
+            recorder = new MediaRecorder(stream);
+        } catch (e) {
+            showToast('録音を開始できません: ' + e.message, 'error');
+            stopSTT();
+            return false;
+        }
+        recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
+        recorder.onstop = async () => {
+            const blob = new Blob(chunks, { type: (recorder && recorder.mimeType) || 'audio/webm' });
+            chunks = [];
+            if (blob.size > 1200 && _sttActive) { // 極小（ノイズのみ）はスキップ
+                updateSttInterim('（認識中…）');
+                try {
+                    const text = await _transcribeWhisper(blob);
+                    if (text) appendTranscriptToInput(text);
+                } catch (e) {
+                    console.warn('[STT] whisper transcribe failed:', e);
+                    showToast('Whisper 認識失敗: ' + e.message, 'error');
+                }
+                updateSttInterim('');
+            }
+            // セグメント完了 → active の間は次セグメント録音を再開
+            if (_sttActive && recorder) { try { recorder.start(); } catch (e) {} }
+        };
+        recorder.start();
+        return true;
+    };
+
+    const rmsOf = () => {
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+            const v = (buf[i] - 128) / 128;
+            sum += v * v;
+        }
+        return Math.sqrt(sum / buf.length);
+    };
+
+    const tick = () => {
+        if (!_sttActive) return;
+        const rms = rmsOf();
+        if (rms > SILENCE_RMS) {
+            speaking = true;
+            silenceStart = 0;
+            updateSttInterim('（録音中…）');
+        } else if (speaking) {
+            if (!silenceStart) silenceStart = performance.now();
+            else if (performance.now() - silenceStart >= sttSilenceMs) {
+                // 発話後に一定時間無音 → セグメント確定
+                speaking = false;
+                silenceStart = 0;
+                if (recorder && recorder.state === 'recording') recorder.stop(); // → onstop で transcribe
+            }
+        }
+        vadTimer = setTimeout(tick, 100);
+    };
+
+    _whisperCtx = {
+        stream, audioCtx,
+        stopAll: () => {
+            if (vadTimer) clearTimeout(vadTimer);
+            try { if (recorder && recorder.state !== 'inactive') { recorder.onstop = null; recorder.stop(); } } catch (e) {}
+            try { stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+            try { audioCtx.close(); } catch (e) {}
+        }
+    };
+
+    if (!startSegment()) return;
+    showToast('🎤 音声入力 ON（Whisper・話すと入力欄に文字が入ります）');
+    tick();
+}
+
+async function _transcribeWhisper(blob) {
+    const form = new FormData();
+    form.append('file', blob, 'audio.webm');
+    form.append('model', 'whisper-1');
+    form.append('language', (sttLang.split('-')[0] || 'ja'));
+    const headers = {};
+    if (apiConfig.key) headers['Authorization'] = 'Bearer ' + apiConfig.key;
+    const res = await fetch(whisperEndpoint, { method: 'POST', body: form, headers });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    return (data.text || '').trim();
+}
+
+function _stopWhisperSTT() {
+    if (_whisperCtx && _whisperCtx.stopAll) {
+        try { _whisperCtx.stopAll(); } catch (e) { /* noop */ }
+    }
+    _whisperCtx = null;
+}
+
+// mic ボタンのクリックハンドラ単独セットアップ（init から呼ぶ）
+function setupSpeechInput() {
+    const btn = document.getElementById('stt-mic-btn');
+    if (!btn || btn._sttBound) return;
+    btn._sttBound = true;
+    btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        toggleSTT();
+    });
+    updateSttMicBtnUI();
+}
+
 // ======== Web Search (検索結果を裏で system prompt に注入) ========
 let webSearchEnabled       = localStorage.getItem('webSearchEnabled') === '1';
 let webSearchProvider      = localStorage.getItem('webSearchProvider') || 'auto'; // 'tavily' | 'ddg' | 'auto'
@@ -1447,6 +1700,7 @@ async function init() {
     setupInfoPanel();
     setupSettingsAccordion();
     setupWebSearchToggleBtn();
+    setupSpeechInput();
     updateQuestHUD();
     updateImggenButtonVisibility();
     
@@ -1619,6 +1873,8 @@ function setupNavigation() {
                 } else {
                     // チャット画面以外に移動 → タイマー停止
                     if (typeof stopLivingWorldTimer === 'function') stopLivingWorldTimer();
+                    // 音声入力もチャット離脱時は停止（マイク開放）
+                    if (_sttActive) stopSTT();
                 }
             }
         });
@@ -1821,6 +2077,20 @@ function setupSettings() {
     const streamingEl = document.getElementById('streaming-enabled');
     if (streamingEl) streamingEl.checked = streamingEnabled;
 
+    // ===== 音声入力 (STT) 設定の読み込み =====
+    const sttEnabledEl   = document.getElementById('stt-enabled');
+    const sttEngineEl    = document.getElementById('stt-engine');
+    const sttLangEl      = document.getElementById('stt-lang');
+    const whisperEpEl    = document.getElementById('whisper-endpoint');
+    const sttSilenceEl   = document.getElementById('stt-silence-ms');
+    const sttAutoSendEl  = document.getElementById('stt-auto-send');
+    if (sttEnabledEl)  sttEnabledEl.checked  = sttEnabled;
+    if (sttEngineEl)   sttEngineEl.value     = sttEngine;
+    if (sttLangEl)     sttLangEl.value       = sttLang;
+    if (whisperEpEl)   whisperEpEl.value     = whisperEndpoint;
+    if (sttSilenceEl)  sttSilenceEl.value    = sttSilenceMs;
+    if (sttAutoSendEl) sttAutoSendEl.checked = sttAutoSend;
+
     // ===== ストレージ使用量メーター =====
     updateStorageMeter();
 
@@ -1957,6 +2227,27 @@ function setupSettings() {
         // ===== ストリーミング設定の保存 =====
         if (streamingEl) streamingEnabled = !!streamingEl.checked;
         localStorage.setItem('streamingEnabled', streamingEnabled ? '1' : '0');
+
+        // ===== 音声入力 (STT) 設定の保存 =====
+        const prevSttEnabled = sttEnabled;
+        if (sttEnabledEl)  sttEnabled    = !!sttEnabledEl.checked;
+        if (sttEngineEl)   sttEngine     = sttEngineEl.value || 'webspeech';
+        if (sttLangEl)     sttLang       = sttLangEl.value || 'ja-JP';
+        if (whisperEpEl)   whisperEndpoint = whisperEpEl.value.trim() || whisperEndpoint;
+        if (sttSilenceEl) {
+            const v = parseInt(sttSilenceEl.value);
+            sttSilenceMs = (isNaN(v) || v < 500) ? 1500 : (v > 5000 ? 5000 : v);
+        }
+        if (sttAutoSendEl) sttAutoSend   = !!sttAutoSendEl.checked;
+        localStorage.setItem('sttEnabled',      sttEnabled ? '1' : '0');
+        localStorage.setItem('sttEngine',       sttEngine);
+        localStorage.setItem('sttLang',         sttLang);
+        localStorage.setItem('whisperEndpoint', whisperEndpoint);
+        localStorage.setItem('sttSilenceMs',    String(sttSilenceMs));
+        localStorage.setItem('sttAutoSend',     sttAutoSend ? '1' : '0');
+        // 設定変更を即時反映: OFF にしたら聴取停止、mic ボタン表示を更新
+        if (prevSttEnabled && !sttEnabled && _sttActive) stopSTT();
+        if (typeof updateSttMicBtnUI === 'function') updateSttMicBtnUI();
 
         // ===== ナレーター用ボイス設定の保存 =====
         if (nvEngineEl) {
