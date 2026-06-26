@@ -550,6 +550,11 @@
                     <input type="number" id="api-tokens" placeholder="1000" value="1000">
                 </div>
                 <div class="form-group">
+                    <label>繰り返しペナルティ (0〜2)</label>
+                    <input type="number" id="repetition-penalty" min="0" max="2" step="0.1" value="0.3" style="width:120px;">
+                    <div class="hint">同じ語の繰り返しを抑制（frequency / presence penalty として送信）。「ろ、ろ、ろ…」のような暴走リピート対策。0で無効、0.3前後推奨。高すぎると語彙が不自然に散ります。<br>※エンジン側でも暴走検出時に自動で打ち切り＋圧縮する二重防御あり</div>
+                </div>
+                <div class="form-group">
                     <label>API Timeout (秒)</label>
                     <input type="number" id="api-timeout" placeholder="180" value="180" min="0">
                     <div class="hint">LLMバックエンドが応答しない場合に自動でリクエストを中断する秒数。0でタイムアウト無効。長時間生成する場合は300〜600推奨。<br>⚡ ストリーミングON時は「無応答が続いた時間」で判定するため、生成が続く限り中断されません。</div>

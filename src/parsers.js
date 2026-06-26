@@ -60,6 +60,31 @@ export function parseChoicesTag(content) {
 }
 
 /**
+ * 暴走リピート（degenerate repetition loop）を圧縮する。
+ * LLM が「ろ、ろ、ろ、…」のように同じ短い単位を延々繰り返す現象の後処理。
+ * 同一の短い単位（1〜12文字）が threshold 回以上連続したら、3回 + 省略記号に畳む。
+ * 正規表現の \1 は後方参照（固定文字列）なので線形時間で安全。
+ */
+export function collapseRunawayRepetition(text, threshold = 6) {
+    if (!text) return text;
+    const minRepeat = Math.max(2, threshold) - 1; // 「最初の1回 + \1{minRepeat,}」で threshold 回
+    const re = new RegExp('([\\s\\S]{1,12}?)\\1{' + minRepeat + ',}', 'g');
+    return text.replace(re, (m, unit) => {
+        if (!unit || !unit.trim()) return m; // 空白のみの単位は触らない
+        return unit + unit + unit + '…';
+    });
+}
+
+/**
+ * テキスト末尾が暴走リピートに陥っているかを判定（ストリーミング早期中断用）。
+ * 早期中断は誤検出を避けるため閾値を高め（連続 8 回以上）にする。
+ */
+export function looksRunawayRepetition(tail) {
+    if (!tail) return false;
+    return /([\s\S]{1,12}?)\1{8,}/.test(tail);
+}
+
+/**
  * AI応答から [INFO]...[/INFO] ブロックを抽出。
  * 戻り値: { infoText: string|null, cleanedContent: string }
  * infoText が null なら未生成。

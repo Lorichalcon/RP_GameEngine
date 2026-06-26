@@ -1,5 +1,5 @@
 import './style.css'
-import { parseChoicesTag, parseInfoTag } from './parsers.js'
+import { parseChoicesTag, parseInfoTag, collapseRunawayRepetition, looksRunawayRepetition } from './parsers.js'
 
 // ======== コンテキストウィンドウ設定 ========
 // LLMへの送信時に保持するチャット履歴のターン数（user+assistantの1往復=1ターン）。
@@ -106,6 +106,13 @@ let narratorVoice = (function() {
 // SSE (stream: true) で生成途中をリアルタイム表示。非対応バックエンドへは自動フォールバック。
 let streamingEnabled = localStorage.getItem('streamingEnabled') !== '0'; // デフォON
 
+// 繰り返しペナルティ（暴走リピート抑制）。frequency/presence_penalty として送信。
+// 0 で無効。0.3 前後が無難（高すぎると語彙が不自然に散る）。
+let repetitionPenalty = (function() {
+    const v = parseFloat(localStorage.getItem('repetitionPenalty'));
+    return isNaN(v) ? 0.3 : v;
+})();
+
 /** 生成途中テキストをチャット欄に仮表示する */
 function updateStreamingPreview(text) {
     const history = document.getElementById('chat-history');
@@ -140,6 +147,8 @@ async function _readSseStreamToText(response, abortCtrl) {
     let fullContent = '';
     let buffer = '';
     let stallTimer = null;
+    let runawayAborted = false;     // 暴走リピート検出による中断か
+    let lastRunawayCheckLen = 0;    // 直近のリピートチェック時の文字数
     const resetStall = () => {
         if (!apiConfig.timeoutSec || apiConfig.timeoutSec <= 0) return;
         if (stallTimer) clearTimeout(stallTimer);
@@ -171,9 +180,24 @@ async function _readSseStreamToText(response, abortCtrl) {
                     }
                 } catch (e) { /* 分割途中の行はスキップ */ }
             }
+            // 暴走リピート検出: 末尾が同一短単位の連続なら早期中断（トークン浪費を防ぐ）
+            if (fullContent.length - lastRunawayCheckLen >= 40) {
+                lastRunawayCheckLen = fullContent.length;
+                if (looksRunawayRepetition(fullContent.slice(-160))) {
+                    console.warn('[stream] runaway repetition detected → abort');
+                    runawayAborted = true;
+                    abortCtrl.abort();
+                    break;
+                }
+            }
         }
     } catch (err) {
         if (err.name === 'AbortError' && fullContent) {
+            if (runawayAborted) {
+                // 暴走分は後段の collapseRunawayRepetition で畳まれる。注記は付けない。
+                console.warn('[stream] returning content after runaway abort');
+                return fullContent;
+            }
             console.warn('[stream] aborted mid-generation, returning partial content');
             return fullContent + '\n\n（…タイムアウトにより途中で打ち切られました）';
         }
@@ -2077,6 +2101,10 @@ function setupSettings() {
     const streamingEl = document.getElementById('streaming-enabled');
     if (streamingEl) streamingEl.checked = streamingEnabled;
 
+    // ===== 繰り返しペナルティ設定の読み込み =====
+    const repPenEl = document.getElementById('repetition-penalty');
+    if (repPenEl) repPenEl.value = repetitionPenalty;
+
     // ===== 音声入力 (STT) 設定の読み込み =====
     const sttEnabledEl   = document.getElementById('stt-enabled');
     const sttEngineEl    = document.getElementById('stt-engine');
@@ -2227,6 +2255,13 @@ function setupSettings() {
         // ===== ストリーミング設定の保存 =====
         if (streamingEl) streamingEnabled = !!streamingEl.checked;
         localStorage.setItem('streamingEnabled', streamingEnabled ? '1' : '0');
+
+        // ===== 繰り返しペナルティ設定の保存 =====
+        if (repPenEl) {
+            const v = parseFloat(repPenEl.value);
+            repetitionPenalty = (isNaN(v) || v < 0) ? 0 : (v > 2 ? 2 : v);
+        }
+        localStorage.setItem('repetitionPenalty', String(repetitionPenalty));
 
         // ===== 音声入力 (STT) 設定の保存 =====
         const prevSttEnabled = sttEnabled;
@@ -6758,6 +6793,11 @@ async function fetchChatCompletion(mode) {
         max_tokens: apiConfig.tokens,
         stream: !!streamingEnabled
     };
+    // 繰り返しペナルティ（暴走リピート抑制）。0 のときは送らない。
+    if (repetitionPenalty && repetitionPenalty > 0) {
+        payload.frequency_penalty = repetitionPenalty;
+        payload.presence_penalty  = repetitionPenalty;
+    }
 
     var headers = {
         'Content-Type': 'application/json'
@@ -6832,6 +6872,11 @@ async function fetchChatCompletion(mode) {
          // <think>より前の部分だけを結合する（もし複数あれば）
          content = parts[0];
     }
+
+    // 3. 暴走リピート（degenerate loop）の圧縮
+    //    「ろ、ろ、ろ、…」のような同一短単位の連続を 3 回 + 省略記号に畳む。
+    //    ストリーミング早期中断・非ストリーミング全文返却の双方に効く最終ガード。
+    content = collapseRunawayRepetition(content);
 
     // タグの残骸などをトリム
     content = content.trim();
