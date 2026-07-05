@@ -731,6 +731,34 @@
 
                 <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
 
+                <h2>📜 チャット要約 (Context Summary)</h2>
+                <p class="hint" style="margin-bottom: 1rem;">チャット履歴が長くなる（10ターン超）と、古い会話を自動で LLM 要約して文脈を維持します（Summaryception方式）。<br>その要約に使うプロンプトをプリセットから選択、または自由に編集できます。</p>
+
+                <div class="form-group">
+                    <label>要約プロンプト プリセット</label>
+                    <select id="summary-prompt-preset">
+                        <option value="default">標準（簡潔・300〜500字）</option>
+                        <option value="telelynx">Telelynx式（構造化・詳細）</option>
+                        <option value="custom">カスタム（下の内容を使用）</option>
+                    </select>
+                    <div class="hint">プリセットを選ぶと下のエディタに内容が表示されます。エディタを編集すると自動的に「カスタム」に切り替わります</div>
+                </div>
+                <div class="form-group">
+                    <label>要約プロンプト（編集可能）</label>
+                    <textarea id="summary-prompt-text" rows="12" style="width:100%; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text-primary); padding:12px; border-radius:8px; font-family:inherit; resize:vertical; font-size:0.85rem;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>要約の Max Tokens</label>
+                    <input type="number" id="summary-max-tokens" min="200" max="4000" step="100" value="400" style="width:120px;">
+                    <div class="hint">標準プリセットは 400 で十分。Telelynx式は構造が長いため <strong>1000〜1500 推奨</strong>。⚠️ 要約は毎リクエストの先頭に注入されるため、大きいほどコンテキストを消費します</div>
+                </div>
+                <p class="hint" style="background: rgba(76, 175, 80, 0.08); padding: 0.75rem; border-radius: 8px; border-left: 3px solid #4caf50;">
+                💡 要約はパーティごとに保存され、チャットリセット・クエスト開始・プレイヤー変更で自動リセットされます。<br>
+                プリセット変更は<strong>次回の要約生成から</strong>反映されます（既存の要約はそのまま統合ベースとして使われます）
+                </p>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
                 <h2>🎭 ペルソナ・モード</h2>
                 <p class="hint" style="margin-bottom: 1rem;">{{user}}（プレイヤー）が<strong>同一人物のまま複数の顔</strong>を使い分ける場合の AI 混同対策。<br>呼称・一人称（私／僕など）でペルソナを自動判別し、AI が顔の違いを理解して応答します。<br>※「別キャラへの完全切替」は自動で別人として扱われます（この機能とは別系統）。</p>
 

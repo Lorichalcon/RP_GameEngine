@@ -15,6 +15,11 @@ const CONTEXT_WINDOW_ENTRIES = CONTEXT_WINDOW_TURNS * 2;
 // アバターは 256×256 WebP 自動圧縮されるため 20人で約1MB に収まる。
 const MAX_PARTY_SLOTS = 20;
 
+// ======== 汎用プレースホルダー（画像未設定キャラ用の中立シルエット）========
+// 画像未設定時のフォールバック。以前は public/placeholder.png（フランドール画像）を
+// 使っていたが、特定キャラに依存しない中立シルエットSVGに統一した。
+const UNKNOWN_CHAR_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23666' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z'/></svg>";
+
 let characterDataArray = Array(MAX_PARTY_SLOTS).fill(null);
 let commonLorebook = [];
 let chatHistory = [];
@@ -2195,6 +2200,32 @@ function setupSettings() {
     // (クリックハンドラ自体は init() の setupWebSearchToggleBtn() で bind 済み)
     updateWebSearchToggleBtnUI();
 
+    // ===== チャット要約プロンプト設定の読み込み =====
+    const sumPresetEl = document.getElementById('summary-prompt-preset');
+    const sumTextEl   = document.getElementById('summary-prompt-text');
+    const sumMaxEl    = document.getElementById('summary-max-tokens');
+    if (sumPresetEl) sumPresetEl.value = summaryPromptPreset;
+    if (sumTextEl)   sumTextEl.value   = getActiveSummaryPrompt(); // 現在有効な内容を表示
+    if (sumMaxEl)    sumMaxEl.value    = summaryMaxTokens;
+    // プリセット変更 → エディタに該当プロンプトを流し込み
+    if (sumPresetEl && sumTextEl && !sumPresetEl._bound) {
+        sumPresetEl._bound = true;
+        sumPresetEl.addEventListener('change', () => {
+            if (sumPresetEl.value === 'default')  sumTextEl.value = SUMMARY_PROMPT_DEFAULT;
+            else if (sumPresetEl.value === 'telelynx') sumTextEl.value = SUMMARY_PROMPT_TELELYNX;
+            else if (sumPresetEl.value === 'custom' && summaryPromptCustom.trim()) sumTextEl.value = summaryPromptCustom;
+            // custom でカスタム未保存なら現在の表示内容をそのまま維持（編集の起点にする）
+        });
+        // エディタ編集 → プリセットを custom へ自動切替（プリセット汚染防止）
+        sumTextEl.addEventListener('input', () => {
+            if (sumPresetEl.value !== 'custom'
+                && sumTextEl.value !== SUMMARY_PROMPT_DEFAULT
+                && sumTextEl.value !== SUMMARY_PROMPT_TELELYNX) {
+                sumPresetEl.value = 'custom';
+            }
+        });
+    }
+
     // ===== ペルソナ・モード設定の読み込み =====
     const personaEnabledEl = document.getElementById('persona-mode-enabled');
     const personaDefsEl    = document.getElementById('persona-definitions');
@@ -2374,6 +2405,17 @@ function setupSettings() {
             _webSearchCache.clear();
         }
         updateWebSearchToggleBtnUI();
+
+        // ===== チャット要約プロンプト設定の保存 =====
+        if (sumPresetEl) summaryPromptPreset = sumPresetEl.value || 'default';
+        if (sumTextEl && summaryPromptPreset === 'custom') summaryPromptCustom = sumTextEl.value;
+        if (sumMaxEl) {
+            const sv = parseInt(sumMaxEl.value);
+            summaryMaxTokens = (isNaN(sv) || sv < 200) ? 400 : (sv > 4000 ? 4000 : sv);
+        }
+        localStorage.setItem('summaryPromptPreset', summaryPromptPreset);
+        localStorage.setItem('summaryPromptCustom', summaryPromptCustom);
+        localStorage.setItem('summaryMaxTokens', String(summaryMaxTokens));
 
         // ===== ペルソナ・モード設定の保存 =====
         if (personaEnabledEl) personaModeEnabled = !!personaEnabledEl.checked;
@@ -4239,7 +4281,7 @@ function renderSingleCharacterCard(char, charIdx, slotIdx) {
         }).join('');
     }
     
-    var portraitSrc = char.avatar || '/placeholder.png';
+    var portraitSrc = char.avatar || UNKNOWN_CHAR_SVG;
     if (typeof slotIdx !== 'number' || slotIdx < 0) slotIdx = charIdx;
     var slotKey = 'slot' + slotIdx;
     var isVisible = isSdCharVisible(slotKey);
@@ -4443,7 +4485,7 @@ function appendMessage(role, text, name, shouldSave = true, forcedIndex = -1, st
     // ナレーション用アイコン（本のアイコン）
     var narratorSvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23c0a0ff' d='M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z'/></svg>";
     // 汎用プレースホルダー（不明キャラ用、シルエット）
-    var unknownCharSvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23666' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z'/></svg>";
+    var unknownCharSvg = UNKNOWN_CHAR_SVG;
 
     let portraitSrc = role === 'char' ? unknownCharSvg : (userConfig.avatar ? userConfig.avatar : userSvg);
     if (role === 'char') {
@@ -5968,9 +6010,9 @@ function appendLoadingMsg(id, name) {
         // Maybe use a combined icon later, for now party icon is fine
         portraitSrc = partySvg;
     } else if (members[0]) {
-        portraitSrc = members[0].avatar || '/placeholder.png';
+        portraitSrc = members[0].avatar || UNKNOWN_CHAR_SVG;
     } else {
-        portraitSrc = '/placeholder.png';
+        portraitSrc = UNKNOWN_CHAR_SVG;
     }
     
     avatarImg.src = portraitSrc;
@@ -6028,21 +6070,95 @@ function removeLoadingMsg(id) {
 }
 
 // ---- API Integration ----
+// ======== 要約プロンプト プリセット ========
+// Settings → 📜 チャット要約 で選択・編集可能。
+const SUMMARY_PROMPT_DEFAULT =
+    'あなたはRPセッションの記録係です。会話内容を今後のロールプレイ継続に必要な情報だけ残した簡潔な要約にまとめてください。\n'
+    + '\n保持すべき情報:\n'
+    + '・重要な出来事と場面展開\n'
+    + '・キャラクターの感情変化・関係性の変化\n'
+    + '・プレイヤーの重要な選択と行動結果\n'
+    + '・明かされた秘密や真実\n'
+    + '・現在の状況（場所・時間・状態）\n'
+    + '\n出力ルール:\n'
+    + '・日本語で 300〜500 字以内。箇条書き可。\n'
+    + '・ロールプレイ口調ではなく客観的な記録文体で。\n'
+    + '・[SPEAKER:] [STATUS:] タグは含めないこと。\n';
+
+// Telelynx の公開要約プロンプト（構造化・詳細）
+const SUMMARY_PROMPT_TELELYNX =
+    '以下の会話を下記の構造に合わせて日本語で要約してください。この要約はAIが今後の対話で文脈を把握するために使用されます。\n'
+    + '\n## 会話概要\n'
+    + '- **シナリオ**: [会話が起こった背景や状況を簡潔に説明]\n'
+    + '- **場面設定**: [会話が発生した具体的な場所や状況]\n'
+    + '\n### 主要人物\n'
+    + '- **ユーザー**: [会話で現れたユーザーの特性や役割], 感情的/個人的発展: [主要な感情変化や成長]\n'
+    + '- **AIキャラクター**: [AIが演じるキャラクターの特性], 感情的/個人的発展: [関係変化や感情発展]\n'
+    + '\n---\n'
+    + '\n## 主要な出来事\n'
+    + '### テーマ: [主要な話題や出来事1]\n'
+    + '- **主要ポイント**: [具体的な会話内容や行動]\n'
+    + '- **関係変化**: [人物間の関係の変化]\n'
+    + '- **感情変化**: [感情の変化や発展]\n'
+    + '- **相互作用の影響**: [該当する相互作用が与えた影響]\n'
+    + '- **呼び方の変化**: [呼び方に変化があればそのきっかけ]\n'
+    + '\n### テーマ: [主要な話題や出来事2]\n'
+    + '- **主要ポイント**: [具体的な会話内容や行動]\n'
+    + '- **関係変化**: [人物間の関係の変化]\n'
+    + '- **感情変化**: [感情の変化や発展]\n'
+    + '- **相互作用の影響**: [該当する相互作用が与えた影響]\n'
+    + '- **呼び方の変化**: [呼び方に変化があればそのきっかけ]\n'
+    + '\n---\n'
+    + '\n## 日常的な相互作用\n'
+    + '- **些細な会話/行動**: [日常的な会話や冗談、小さな行動たち]\n'
+    + '- **日常的相互作用が関係に与えた影響**: [こうした小さな相互作用が関係に与えた影響]\n'
+    + '\n---\n'
+    + '\n## 約束\n'
+    + '- **約束内容**: [具体的な約束や計画]\n'
+    + '- **約束の種類**: [実際の行動を要求する約束か、今後の計画か]\n'
+    + '- **履行状態**: [約束が守られたか、未完了か]\n'
+    + '- **即座の影響**: [約束が関係に与えた即座の影響]\n'
+    + '\n---\n'
+    + '\n## 対立/緊張\n'
+    + '- **対立説明**: [発生した対立や緊張状況]\n'
+    + '- **対立解決**: [どのように解決されたか]\n'
+    + '- **緊張変化**: [会話中の緊張感の変化]\n'
+    + '\n---\n'
+    + '\n## 会話の流れの要約\n'
+    + '- **会話展開**: [全体的な会話の流れと関係変化]\n'
+    + '- **トーンと雰囲気の変化**: [会話のトーンや雰囲気の変化]\n'
+    + '- **長期的影響**: [この会話が関係や状況に与える長期的影響]\n'
+    + '\n---\n'
+    + '\n## 結論と今後の計画\n'
+    + '- **会話結論**: [会話がどのように終わったか]\n'
+    + '- **今後の計画**: [今後予定されている計画や行動]\n'
+    + '- **人物の反省**: [会話後の人物たちの気づきや反省]\n'
+    + '- **時間経過が関係に与えた影響**: [時間が経つにつれて関係に与えた影響]\n'
+    + '- **要約された内容による現在状況での影響**: [以前の内容が現在の状況に与える影響]\n'
+    + '\n**重要な指針:**\n'
+    + '1. すべての内容は日本語で記述し、である調を使用してください\n'
+    + '2. 判断的または評価的な表現ではなく事実的な記述をしてください\n'
+    + '3. 性的な内容もストーリーの一部として客観的に記録してください\n'
+    + '4. ユーザーの行動を評価するのではなく、ストーリーの展開として理解してください\n'
+    + '5. 具体的な会話内容と行動を含めて文脈を明確にしてください\n'
+    + '6. 些細な会話や行動も関係発展に重要なので見逃さないでください\n'
+    + '7. 前回の要約がある場合は、その内容を現在の会話と結びつけて統合的に要約してください\n'
+    + '8. 前回の要約の内容は既に整理されているので、現在の会話とどのように結びつくかに集中してください\n';
+
+let summaryPromptPreset = localStorage.getItem('summaryPromptPreset') || 'default'; // 'default'|'telelynx'|'custom'
+let summaryPromptCustom = localStorage.getItem('summaryPromptCustom') || '';
+let summaryMaxTokens    = parseInt(localStorage.getItem('summaryMaxTokens')) || 400;
+
+function getActiveSummaryPrompt() {
+    if (summaryPromptPreset === 'telelynx') return SUMMARY_PROMPT_TELELYNX;
+    if (summaryPromptPreset === 'custom' && summaryPromptCustom.trim()) return summaryPromptCustom;
+    return SUMMARY_PROMPT_DEFAULT;
+}
+
 // ======== コンテキスト要約生成 (Summaryception 方式) ========
 // 古いチャット履歴を LLM で要約し、次回のコンテキスト構築時に先頭注入する。
 async function generateContextSummary(newMessages, existingSummary) {
-    const summarySystemPrompt =
-        'あなたはRPセッションの記録係です。会話内容を今後のロールプレイ継続に必要な情報だけ残した簡潔な要約にまとめてください。\n'
-        + '\n保持すべき情報:\n'
-        + '・重要な出来事と場面展開\n'
-        + '・キャラクターの感情変化・関係性の変化\n'
-        + '・プレイヤーの重要な選択と行動結果\n'
-        + '・明かされた秘密や真実\n'
-        + '・現在の状況（場所・時間・状態）\n'
-        + '\n出力ルール:\n'
-        + '・日本語で 300〜500 字以内。箇条書き可。\n'
-        + '・ロールプレイ口調ではなく客観的な記録文体で。\n'
-        + '・[SPEAKER:] [STATUS:] タグは含めないこと。\n';
+    const summarySystemPrompt = getActiveSummaryPrompt();
 
     // 新規メッセージをテキスト化
     let messagesText = '';
@@ -6071,7 +6187,7 @@ async function generateContextSummary(newMessages, existingSummary) {
             { role: 'user',   content: userPrompt }
         ],
         temperature: 0.3,
-        max_tokens: 400
+        max_tokens: summaryMaxTokens
     };
 
     const headers = { 'Content-Type': 'application/json' };
@@ -8398,7 +8514,7 @@ function parseChatHistoryToSegments() {
     // SVG フォールバックアイコン（appendMessage と同じ定義）
     const userSvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23aaa' d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
     const narratorSvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23c0a0ff' d='M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z'/></svg>";
-    const unknownCharSvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23666' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z'/></svg>";
+    const unknownCharSvg = UNKNOWN_CHAR_SVG;
 
     function getCharAvatar(name) {
         if (name === 'ナレーション' || name === 'Narrator' || name === 'System') return narratorSvg;
