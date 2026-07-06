@@ -218,6 +218,10 @@
                             <button id="summary-panel-toggle" title="コンテキスト要約を表示: 長いチャットで自動生成された要約文を右パネルで確認">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                             </button>
+                            <!-- 💬 純チャットモード（RP設定を注入しない素のAIチャット） -->
+                            <button id="pure-chat-toggle" title="純チャットモード: RP設定を一切注入せず素のAIチャット（履歴はRPと別枠保存）">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+                            </button>
                             <!-- 自動音声読み上げトグル (TTS) -->
                             <button id="autoplay-tts-toggle" title="自動音声読み上げ: AI発言時に自動でボイスを再生（ON/OFFトグル）">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
@@ -586,6 +590,23 @@
                     </div>
                     <div class="hint">ブラウザの localStorage 上限は約5MB。逼迫したら古いセッション削除やパーティ整理を。アバターは自動でWebP圧縮されます</div>
                 </div>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>💬 純チャットモード (Pure Chat)</h2>
+                <p class="hint" style="margin-bottom: 1rem;">RP用の設定（Player Info / SPEAKER / クエスト / Lore / ペルソナ等）を<strong>一切注入せず</strong>、Kobold と素のAIチャットをするモード。<br>チャット欄ツールバーの 🤖 ボタンでいつでも切替できます。<strong>履歴・要約はRPセッションと別枠で保存</strong>されるため、切り替えても互いに汚染しません。</p>
+
+                <div class="form-group">
+                    <label>純チャット用システムプロンプト（空欄なら system なしで送信）</label>
+                    <textarea id="pure-chat-system-prompt" rows="4" style="width:100%; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text-primary); padding:12px; border-radius:8px; font-family:inherit; resize:vertical; font-size:0.9rem;"></textarea>
+                    <div class="hint">既定: 「あなたは親切で有能なAIアシスタントです。…」。翻訳専用・コーディング補助など用途に合わせて書き換え可能</div>
+                </div>
+                <p class="hint" style="background: rgba(76, 175, 80, 0.08); padding: 0.75rem; border-radius: 8px; border-left: 3px solid #4caf50;">
+                💡 純チャット中の挙動:<br>
+                ・ストリーミング / 繰り返しペナルティ / タイムアウトは共通で有効<br>
+                ・Web Search / AI Memo / 選択肢 / Info Panel などのRP機能は自動的に無効<br>
+                ・履歴は直近 10 ターンのスライディングウィンドウで送信（要約はなし）
+                </p>
 
                 <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
 

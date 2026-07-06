@@ -3456,3 +3456,41 @@ main {
     z-index: 1050;
   }
 }
+
+/* ======== 💬 純チャットモード トグル（ツールバー内・ロボットアイコン） ======== */
+#pure-chat-toggle {
+  background: rgba(80, 200, 190, 0.1);
+  color: #6fd8cf;
+  border: 1px solid rgba(80, 200, 190, 0.3);
+  border-radius: 9px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: center;
+  position: relative;
+}
+#pure-chat-toggle:hover {
+  background: rgba(80, 200, 190, 0.25);
+}
+#pure-chat-toggle.active {
+  background: rgba(80, 200, 190, 0.35);
+  border-color: #6fd8cf;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(80, 200, 190, 0.35);
+}
+#pure-chat-toggle.active::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4caf50;
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.9);
+  pointer-events: none;
+}

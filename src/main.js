@@ -111,6 +111,50 @@ let narratorVoice = (function() {
 // SSE (stream: true) で生成途中をリアルタイム表示。非対応バックエンドへは自動フォールバック。
 let streamingEnabled = localStorage.getItem('streamingEnabled') !== '0'; // デフォON
 
+// ======== 純チャットモード (Pure Chat) ========
+// RP用のプロンプト注入（Player Info / SPEAKER / クエスト / Lore / ペルソナ等）を
+// 一切行わず、Kobold と素のアシスタントチャットをする。
+// 履歴・要約は専用バケット (pure_chat__) に分離され、RPセッションを汚染しない。
+let pureChatMode = localStorage.getItem('pureChatMode') === '1';
+let pureChatSystemPrompt = localStorage.getItem('pureChatSystemPrompt')
+    || 'あなたは親切で有能なAIアシスタントです。ユーザーの言語に合わせて自然に応答してください。';
+
+function updatePureChatToggleUI() {
+    const btn = document.getElementById('pure-chat-toggle');
+    if (!btn) return;
+    btn.classList.toggle('active', pureChatMode);
+    btn.title = pureChatMode
+        ? '💬 純チャットモード ON（クリックでRPモードに戻る）'
+        : '純チャットモード: RP設定を一切注入せず素のAIチャット（履歴はRPと別枠保存）';
+}
+
+/** 純チャット⇄RPの切替。履歴バケットが変わるため画面を再構築する */
+function setPureChatMode(on) {
+    if (pureChatMode === !!on) return;
+    pureChatMode = !!on;
+    localStorage.setItem('pureChatMode', pureChatMode ? '1' : '0');
+    updatePureChatToggleUI();
+    // 旧バケットのUI残骸をクリア
+    clearChoiceButtons();
+    lastInfoSnapshot = '';
+    renderInfoPanel('');
+    // 新バケットの要約・履歴を読み込んで再描画
+    loadContextSummary();
+    restoreChatFromStorage();
+    refreshSummaryPanelIfOpen();
+    showToast(pureChatMode
+        ? '💬 純チャットモード ON — RP設定なしの素のチャット（履歴は別枠）'
+        : '🎭 RPモードに戻りました');
+}
+
+function setupPureChatToggle() {
+    const btn = document.getElementById('pure-chat-toggle');
+    if (!btn || btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', () => setPureChatMode(!pureChatMode));
+    updatePureChatToggleUI();
+}
+
 // 繰り返しペナルティ（暴走リピート抑制）。frequency/presence_penalty として送信。
 // 0 で無効。0.3 前後が無難（高すぎると語彙が不自然に散る）。
 let repetitionPenalty = (function() {
@@ -636,6 +680,7 @@ function formatAiMemoForPrompt() {
  */
 function shouldPerformWebSearch(userMessage) {
     if (!webSearchEnabled) { console.log('[WebSearch] disabled'); return null; }
+    if (pureChatMode) return null; // 純チャットは注入経路がないため検索しない
     if (!userMessage) return null;
     // 1. 明示トリガー [search:〜]（RP本文中に埋め込まれていても発動・クールダウン無視）
     const m = userMessage.match(/\[search:\s*([^\]\n]+)\]/i);
@@ -1731,6 +1776,7 @@ async function init() {
     setupWebSearchToggleBtn();
     setupSpeechInput();
     setupSummaryPanel();
+    setupPureChatToggle();
     updateQuestHUD();
     updateImggenButtonVisibility();
     
@@ -1779,64 +1825,10 @@ async function init() {
         }
 
         renderPartySheet();
-        
+
         // Use party ID for chat history (getPartyId() と同じロジックを使用)
         loadContextSummary(); // 要約復元（chatHistory 読込前でも partyId が確定していれば OK）
-        const savedChat = localStorage.getItem('chatHistory_' + getPartyId());
-        if (savedChat) {
-            chatHistory = JSON.parse(savedChat);
-
-            // status_values を履歴中の最新 statusSnapshot に同期（リロード後も値を維持）
-            if (activeQuest && _hasAnyStatusParams(activeQuest)) {
-                if (!activeQuest.state) activeQuest.state = {};
-                for (let i = chatHistory.length - 1; i >= 0; i--) {
-                    if (chatHistory[i].statusSnapshot) {
-                        activeQuest.state.status_values = JSON.parse(JSON.stringify(chatHistory[i].statusSnapshot));
-                        break;
-                    }
-                }
-            }
-
-            // Info Panel: 履歴中の最新 infoSnapshot を復元（リロード後も状況サマリを維持）
-            for (let i = chatHistory.length - 1; i >= 0; i--) {
-                if (chatHistory[i].infoSnapshot) {
-                    lastInfoSnapshot = chatHistory[i].infoSnapshot;
-                    break;
-                }
-            }
-            if (lastInfoSnapshot && infoPanelEnabled) {
-                renderInfoPanel(lastInfoSnapshot);
-            }
-
-            // Restore visual messages — splitAndAppendCharMessages を使い SPEAKER タグを正しく解析
-            document.getElementById('chat-history').innerHTML = '';
-            chatHistory.forEach((msg, idx) => {
-                if (msg.isImage && msg.imageData) {
-                    // Restore generated image (full data available)
-                    const imgMsgDiv = appendImageMessage(msg.imageData, msg.content.replace('[Generated Image]\nPrompt: ', ''));
-                    imgMsgDiv.setAttribute('data-index', idx);
-                } else if (msg.isImage && !msg.imageData) {
-                    // Image data stripped from localStorage — show regeneration placeholder
-                    const promptText = msg.content.replace('[Generated Image]\nPrompt: ', '');
-                    renderImagePlaceholder(idx, promptText);
-                } else if (msg.role === 'narrator') {
-                    appendNarrationMessage(msg.content, idx);
-                } else if (msg.role === 'user') {
-                    appendMessage('user', msg.content, userConfig.name, false, idx);
-                } else {
-                    // assistant メッセージは SPEAKER タグ解析付きで復元
-                    // NOTE: allowUserSpeaker=true は banter_player モード専用。履歴復元時に
-                    // 内容文字列だけで自動判定するとフィルタを貫通してしまい、Editによる再描画等で
-                    // AI生成のプレイヤー発言が復活する不具合が発生するため、常に false で復元する。
-                    splitAndAppendCharMessages(msg.content, false, idx, false);
-                }
-            });
-            updateRegenButtonVisibility();
-            // ステータスHUDを同期
-            if (typeof updateStatusHUD === 'function') updateStatusHUD();
-        } else {
-            initializeChat(characterDataArray);
-        }
+        restoreChatFromStorage();
         renderPartySetGrid();
         updateEditTabNames();
 
@@ -2111,6 +2103,10 @@ function setupSettings() {
     const repPenEl = document.getElementById('repetition-penalty');
     if (repPenEl) repPenEl.value = repetitionPenalty;
 
+    // ===== 純チャットモード設定の読み込み =====
+    const pureChatPromptEl = document.getElementById('pure-chat-system-prompt');
+    if (pureChatPromptEl) pureChatPromptEl.value = pureChatSystemPrompt;
+
     // ===== 音声入力 (STT) 設定の読み込み =====
     const sttEnabledEl   = document.getElementById('stt-enabled');
     const sttEngineEl    = document.getElementById('stt-engine');
@@ -2294,6 +2290,10 @@ function setupSettings() {
             repetitionPenalty = (isNaN(v) || v < 0) ? 0 : (v > 2 ? 2 : v);
         }
         localStorage.setItem('repetitionPenalty', String(repetitionPenalty));
+
+        // ===== 純チャットモード設定の保存 =====
+        if (pureChatPromptEl) pureChatSystemPrompt = pureChatPromptEl.value;
+        localStorage.setItem('pureChatSystemPrompt', pureChatSystemPrompt);
 
         // ===== 音声入力 (STT) 設定の保存 =====
         const prevSttEnabled = sttEnabled;
@@ -4346,7 +4346,77 @@ function renderSingleCharacterCard(char, charIdx, slotIdx) {
 
 // ---- Chat Terminal Logic ----
 function getPartyId() {
+    // 純チャットモードは専用バケット: RPセッションの履歴・要約と完全分離する
+    if (pureChatMode) return 'pure_chat__';
     return Array.from(characterDataArray).map(c => c ? (c.name || 'empty') : 'empty').join('-');
+}
+
+/**
+ * 現在の partyId バケットから chatHistory をロードして画面を再構築する。
+ * init() 起動時と、純チャットモード切替（バケット切替）時に使用。
+ */
+function restoreChatFromStorage() {
+    const savedChat = localStorage.getItem('chatHistory_' + getPartyId());
+    if (savedChat) {
+        chatHistory = JSON.parse(savedChat);
+
+        // status_values を履歴中の最新 statusSnapshot に同期（リロード後も値を維持）
+        if (activeQuest && _hasAnyStatusParams(activeQuest)) {
+            if (!activeQuest.state) activeQuest.state = {};
+            for (let i = chatHistory.length - 1; i >= 0; i--) {
+                if (chatHistory[i].statusSnapshot) {
+                    activeQuest.state.status_values = JSON.parse(JSON.stringify(chatHistory[i].statusSnapshot));
+                    break;
+                }
+            }
+        }
+
+        // Info Panel: 履歴中の最新 infoSnapshot を復元（リロード後も状況サマリを維持）
+        for (let i = chatHistory.length - 1; i >= 0; i--) {
+            if (chatHistory[i].infoSnapshot) {
+                lastInfoSnapshot = chatHistory[i].infoSnapshot;
+                break;
+            }
+        }
+        if (lastInfoSnapshot && infoPanelEnabled) {
+            renderInfoPanel(lastInfoSnapshot);
+        }
+
+        // Restore visual messages — splitAndAppendCharMessages を使い SPEAKER タグを正しく解析
+        document.getElementById('chat-history').innerHTML = '';
+        chatHistory.forEach((msg, idx) => {
+            if (msg.isImage && msg.imageData) {
+                // Restore generated image (full data available)
+                const imgMsgDiv = appendImageMessage(msg.imageData, msg.content.replace('[Generated Image]\nPrompt: ', ''));
+                imgMsgDiv.setAttribute('data-index', idx);
+            } else if (msg.isImage && !msg.imageData) {
+                // Image data stripped from localStorage — show regeneration placeholder
+                const promptText = msg.content.replace('[Generated Image]\nPrompt: ', '');
+                renderImagePlaceholder(idx, promptText);
+            } else if (msg.role === 'narrator') {
+                appendNarrationMessage(msg.content, idx);
+            } else if (msg.role === 'user') {
+                appendMessage('user', msg.content, userConfig.name, false, idx);
+            } else {
+                // assistant メッセージは SPEAKER タグ解析付きで復元
+                // NOTE: allowUserSpeaker=true は banter_player モード専用。履歴復元時に
+                // 内容文字列だけで自動判定するとフィルタを貫通してしまい、Editによる再描画等で
+                // AI生成のプレイヤー発言が復活する不具合が発生するため、常に false で復元する。
+                splitAndAppendCharMessages(msg.content, false, idx, false);
+            }
+        });
+        updateRegenButtonVisibility();
+        // ステータスHUDを同期
+        if (typeof updateStatusHUD === 'function') updateStatusHUD();
+    } else if (pureChatMode) {
+        // 純チャットの新規バケット: RP用イントロ（first_mes 等）は流さない
+        chatHistory = [];
+        const hist = document.getElementById('chat-history');
+        if (hist) hist.innerHTML = '';
+        updateRegenButtonVisibility();
+    } else {
+        initializeChat(characterDataArray);
+    }
 }
 
 function getActivePartyMembers() {
@@ -5185,6 +5255,23 @@ function snapshotStatusValues() {
 
 // Split AI reply into per-character messages
 function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, allowUserSpeaker = false) {
+    // ===== 💬 純チャットモード: SPEAKER解析なしで「AI」のシンプルバブルとして表示 =====
+    if (pureChatMode) {
+        let mIdx = forcedIndex;
+        const clean = (fullReply || '').replace(/<\/?think>/gi, '').trim();
+        if (shouldSave) {
+            chatHistory.push({ role: 'assistant', content: clean });
+            saveChatHistory();
+            mIdx = chatHistory.length - 1;
+        }
+        appendMessage('char', clean, 'AI', false, mIdx, null);
+        if (shouldSave && autoplayTts) {
+            const resolved = resolveTtsVoice('ナレーション', null);
+            if (resolved) queueTts(clean, resolved.voice, true); // 全文読み上げ
+        }
+        return;
+    }
+
     const members = getActivePartyMembers();
 
     // [MEMO: 〜] タグを最初に抽出（AI Memo へ追加 + 表示文からは除去）
@@ -6329,12 +6416,31 @@ function resetContextSummary() {
 }
 
 async function fetchChatCompletion(mode) {
+    if (!apiConfig.endpoint) throw new Error("API Endpoint is missing. Please check Settings.");
+
+    // ===== 💬 純チャットモード: RP用プロンプト注入を一切せず素のチャットを送る =====
+    // Player Info / SPEAKER / クエスト / Lore / ペルソナ / directive 群をすべてバイパス。
+    if (pureChatMode) {
+        const msgs = [];
+        if (pureChatSystemPrompt && pureChatSystemPrompt.trim()) {
+            msgs.push({ role: 'system', content: pureChatSystemPrompt.trim() });
+        }
+        // スライディングウィンドウのみ適用（Summaryception はRP用のため使わない）
+        const hist = chatHistory.length > CONTEXT_WINDOW_ENTRIES
+            ? chatHistory.slice(-CONTEXT_WINDOW_ENTRIES)
+            : chatHistory;
+        hist.forEach(m => {
+            if (m.isImage) return; // 画像エントリは送信対象外
+            msgs.push({ role: (m.role === 'narrator') ? 'assistant' : m.role, content: m.content });
+        });
+        return _executeChatRequest(msgs);
+    }
+
     // Banter モード時にメンバー選択オーバーライドが設定されていればそれを優先
     const isBanter = (mode === 'banter' || mode === 'banter_player');
     const members = (isBanter && Array.isArray(_banterMembersOverride) && _banterMembersOverride.length > 0)
         ? _banterMembersOverride
         : getActivePartyMembers();
-    if (!apiConfig.endpoint) throw new Error("API Endpoint is missing. Please check Settings.");
 
     // Construct System Prompt
     let systemPrompt = '';
@@ -6987,6 +7093,15 @@ async function fetchChatCompletion(mode) {
         messages.push({ role: 'user', content: `[システム: ${allNames}が自由に会話してください。${userConfig.name}も会話参加者です。全員の発言を [SPEAKER: 名前] タグ付きで生成してください。]` });
     }
     
+    return _executeChatRequest(messages);
+}
+
+/**
+ * messages 配列を LLM に送信して応答テキストを返す共有ヘルパー。
+ * RPモード（fetchChatCompletion）と純チャットモードの両方から使用。
+ * タイムアウト・ストリーミング/JSONフォールバック・<think>除去・暴走圧縮を内包。
+ */
+async function _executeChatRequest(messages) {
     var payload = {
         model: apiConfig.model,
         messages: messages,
@@ -7003,11 +7118,11 @@ async function fetchChatCompletion(mode) {
     var headers = {
         'Content-Type': 'application/json'
     };
-    
+
     if (apiConfig.key) {
         headers['Authorization'] = 'Bearer ' + apiConfig.key;
     }
-    
+
     // ===== AbortController + タイムアウト =====
     // KoboldCpp 等が長時間生成中にコネクション切断を起こしてレスポンスが永久に届かない
     // ケースを物理的に防ぐ。timeoutSec=0 ならタイムアウト無効。
@@ -8310,6 +8425,7 @@ async function checkAndFireLivingWorldEvent() {
         stopLivingWorldTimer();
         return;
     }
+    if (pureChatMode) return;                  // 純チャット中はRPイベントを流さない
     if (_isLivingWorldFiring) return;          // 二重発火防止
     if (typeof isSending !== 'undefined' && isSending) return;  // AI 応答生成中はスキップ
     if (_isGeneratingNpc) return;              // NPC 生成中もスキップ
