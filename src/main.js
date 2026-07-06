@@ -1730,6 +1730,7 @@ async function init() {
     setupSettingsAccordion();
     setupWebSearchToggleBtn();
     setupSpeechInput();
+    setupSummaryPanel();
     updateQuestHUD();
     updateImggenButtonVisibility();
     
@@ -5025,10 +5026,31 @@ function renderInfoPanel(infoText) {
         return;
     }
 
-    // 【見出し】を span でラップして色付け
-    const escaped = escapeHTML(infoText);
-    const rendered = escaped.replace(/(【[^】]+】)/g, '<span class="info-section-header">$1</span>');
-    body.innerHTML = rendered;
+    // ── コンパクト描画 ──
+    // AI 出力の改行をそのまま表示すると縦に伸びるため、
+    // 【見出し】行だけをブロックにし、それ以外の行は「 ｜ 」で連結してインライン流し込みにする。
+    // フォントサイズは据え置き、行数だけを圧縮する。
+    const lines = infoText.split(/\n+/).map(l => l.trim()).filter(l => l.length > 0);
+    let html = '';
+    let inlineBuf = [];
+    const flushInline = () => {
+        if (inlineBuf.length) {
+            html += '<span class="info-inline">' + inlineBuf.join(' ｜ ') + '</span>';
+            inlineBuf = [];
+        }
+    };
+    lines.forEach(line => {
+        const headMatch = line.match(/^(【[^】]+】)\s*(.*)$/);
+        if (headMatch) {
+            flushInline();
+            html += '<span class="info-section-header">' + escapeHTML(headMatch[1]) + '</span>';
+            if (headMatch[2]) inlineBuf.push(escapeHTML(headMatch[2]));
+        } else {
+            inlineBuf.push(escapeHTML(line));
+        }
+    });
+    flushInline();
+    body.innerHTML = html;
     body.scrollTop = 0;
 }
 
@@ -5048,6 +5070,68 @@ function updateInfoPanelVisibility() {
         if (lastInfoSnapshot) renderInfoPanel(lastInfoSnapshot);
     } else {
         panel.classList.add('hidden');
+    }
+}
+
+// ======== 📜 コンテキスト要約ビューア（右スライドパネル） ========
+
+/** 要約パネルの中身を最新状態に更新する（開いている時のみ描画コスト発生） */
+function renderSummaryPanel() {
+    const body = document.getElementById('summary-panel-body');
+    const meta = document.getElementById('summary-panel-meta');
+    if (!body || !meta) return;
+
+    // メタ情報: 要約済み件数 / プリセット名
+    const presetLabel = summaryPromptPreset === 'telelynx' ? 'Telelynx式'
+                      : summaryPromptPreset === 'custom'   ? 'カスタム'
+                      : '標準';
+    meta.textContent = '要約済み: ' + lastSummarizedIndex + ' / ' + chatHistory.length + ' 件'
+        + '　|　プリセット: ' + presetLabel
+        + (contextSummary ? '　|　' + contextSummary.length + ' 字' : '');
+
+    if (!contextSummary || !contextSummary.trim()) {
+        body.innerHTML = '<span class="summary-panel-empty">まだ要約はありません。<br>チャットが '
+            + CONTEXT_WINDOW_ENTRIES + ' 件（' + (CONTEXT_WINDOW_ENTRIES / 2) + 'ターン）を超えると自動生成されます。</span>';
+        return;
+    }
+
+    // Markdown 風の見出し（## 〜）と太字（**〜**）を軽く整形して表示
+    let html = escapeHTML(contextSummary);
+    html = html.replace(/^###\s*(.+)$/gm, '<span class="summary-h3">$1</span>');
+    html = html.replace(/^##\s*(.+)$/gm, '<span class="summary-h2">$1</span>');
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/^---+$/gm, '<hr class="summary-hr">');
+    body.innerHTML = html;
+}
+
+/** 要約パネルの開閉トグル */
+function toggleSummaryPanel(forceOpen) {
+    const panel = document.getElementById('summary-panel');
+    const btn = document.getElementById('summary-panel-toggle');
+    if (!panel) return;
+    const opening = (forceOpen !== undefined) ? forceOpen : panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !opening);
+    panel.setAttribute('aria-hidden', opening ? 'false' : 'true');
+    if (btn) btn.classList.toggle('active', opening);
+    if (opening) renderSummaryPanel(); // 開くたびに最新化
+}
+
+/** 要約パネルが開いていれば再描画（要約更新直後のライブ反映用） */
+function refreshSummaryPanelIfOpen() {
+    const panel = document.getElementById('summary-panel');
+    if (panel && !panel.classList.contains('hidden')) renderSummaryPanel();
+}
+
+function setupSummaryPanel() {
+    const btn = document.getElementById('summary-panel-toggle');
+    const closeBtn = document.getElementById('summary-panel-close');
+    if (btn && !btn._bound) {
+        btn._bound = true;
+        btn.addEventListener('click', () => toggleSummaryPanel());
+    }
+    if (closeBtn && !closeBtn._bound) {
+        closeBtn._bound = true;
+        closeBtn.addEventListener('click', () => toggleSummaryPanel(false));
     }
 }
 
@@ -6833,6 +6917,7 @@ async function fetchChatCompletion(mode) {
             contextSummary = await generateContextSummary(newMsgsToSummarize, contextSummary);
             lastSummarizedIndex = trimPoint;
             saveContextSummary();
+            refreshSummaryPanelIfOpen(); // 📜 ビューアが開いていればライブ更新
         } catch (e) {
             console.warn('[ContextSummary] 要約生成エラー:', e.message);
             // フォールバック: 既存の要約をそのまま使う（または空）

@@ -149,6 +149,17 @@
                         </div>
                     </div>
                 </aside>
+                <!-- 📜 コンテキスト要約ビューア（右スライドパネル・初期非表示） -->
+                <aside id="summary-panel" class="summary-panel hidden" aria-hidden="true">
+                    <div class="summary-panel-header">
+                        <span class="summary-panel-title">📜 Context Summary</span>
+                        <button id="summary-panel-close" class="summary-panel-close" title="閉じる">✕</button>
+                    </div>
+                    <div class="summary-panel-meta" id="summary-panel-meta"></div>
+                    <div class="summary-panel-body" id="summary-panel-body">
+                        <span class="summary-panel-empty">まだ要約はありません。</span>
+                    </div>
+                </aside>
                 <!-- 📊 Info Panel (Telelynx式・状況サマリ) — 初期非表示 -->
                 <div id="info-panel" class="info-panel hidden">
                     <div class="info-panel-header">
@@ -202,6 +213,10 @@
                             <!-- Info Panel トグル（Telelynx式・状況サマリ） -->
                             <button id="info-panel-toggle" title="Info Panel: AIが各応答に【現在の状況】【ユーザー情報】【登場キャラ】等の状況サマリを生成（ON/OFFトグル）">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+                            </button>
+                            <!-- 📜 コンテキスト要約ビューア（右パネル表示トグル） -->
+                            <button id="summary-panel-toggle" title="コンテキスト要約を表示: 長いチャットで自動生成された要約文を右パネルで確認">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                             </button>
                             <!-- 自動音声読み上げトグル (TTS) -->
                             <button id="autoplay-tts-toggle" title="自動音声読み上げ: AI発言時に自動でボイスを再生（ON/OFFトグル）">
