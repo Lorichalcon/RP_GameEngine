@@ -1756,6 +1756,7 @@ function applyMacros(text, charName = null) {
 }
 
 async function init() {
+    hardenFormFields(); // 最初に実行: ブラウザのフォーム位置復元によるズレを防ぐ
     setupNavigation();
     setupSettings();
     setupSdSettings();
@@ -2006,6 +2007,19 @@ function showToast(message, type) {
     el.classList.add('visible');
     if (_toastTimer) clearTimeout(_toastTimer);
     _toastTimer = setTimeout(() => el.classList.remove('visible'), 2500);
+}
+
+// ---- フォーム復元シールド ----
+// ブラウザ（Chrome/Firefox）はリロード・タブ復元時に未送信フォーム値を自動復元するが、
+// name 属性の無いコントロールは「ページ内の出現位置」で照合される。
+// バージョン更新で Settings にセクションを途中挿入すると、旧レイアウト時代に記録された値が
+// 位置ズレした別の欄に復元され、内容がぐちゃぐちゃになる（例: 世界観テンプレが純チャット欄に入る）。
+// 対策: 全コントロールに name(=id) を与えて位置照合を無効化し、autocomplete=off で復元自体も抑止する。
+function hardenFormFields() {
+    document.querySelectorAll('input[id], textarea[id], select[id]').forEach(el => {
+        if (!el.getAttribute('name')) el.setAttribute('name', el.id);
+        el.setAttribute('autocomplete', 'off');
+    });
 }
 
 // ---- Settings Accordion (各 h2 セクションを折り畳み可能にする) ----
