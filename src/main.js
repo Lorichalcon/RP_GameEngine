@@ -5310,12 +5310,18 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
     // 末尾選択肢 [CHOICES]...[/CHOICES] を抽出して本文から除去
     // 抽出した選択肢は分割処理後にボタンとして描画する
     let _extractedChoices = [];
+    let _choicesRawBlock = ''; // 履歴保存用の正規化 [CHOICES] ブロック（表示からは除去するがモデルの手本として履歴に残す）
     if (showChoices) {
         const choicesResult = parseChoicesTag(fullReply);
         if (choicesResult.choices.length > 0) {
             _extractedChoices = choicesResult.choices;
             fullReply = choicesResult.cleanedContent;
-            // chatHistory 保存時にも CHOICES を含まない本文を保存（API 再送信時のノイズ除去）
+            // 履歴には正規化した [CHOICES] ブロックを残す。
+            // これがないと API 送信履歴に選択肢が一切残らず、ローカルモデルが
+            // 「直前の自分の応答に選択肢が無い」パターンを真似て2ターン目以降に選択肢を出さなくなる。
+            _choicesRawBlock = '\n\n[CHOICES]\n'
+                + choicesResult.choices.map((c, i) => (i + 1) + '. ' + c).join('\n')
+                + '\n[/CHOICES]';
         }
     } else {
         // showChoices=false でも誤って AI が出力した CHOICES タグは除去する
@@ -5341,7 +5347,7 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             let mIdx = forcedIndex;
             if (shouldSave) {
                 const clean = fullReply.replace(/<\/?think>/gi, '').trim();
-                chatHistory.push({ role: 'assistant', content: clean });
+                chatHistory.push({ role: 'assistant', content: clean + _choicesRawBlock });
                 saveChatHistory();
                 mIdx = chatHistory.length - 1;
             }
@@ -5385,6 +5391,11 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             ? (existingSnapshot && existingSnapshot[name]) || null
             : getStatusValueForSpeaker(name);
         appendMessage('char', applyMacros(cleanedContent, name), name, shouldSave, forcedIndex, statusForSpeaker);
+        // 選択肢ブロックを履歴に残す（appendMessage は内部で push 済みなので末尾エントリへ追記）
+        if (shouldSave && _choicesRawBlock && chatHistory.length > 0) {
+            chatHistory[chatHistory.length - 1].content += _choicesRawBlock;
+            saveChatHistory();
+        }
         if (shouldSave && autoplayTts) {
             const resolved = resolveTtsVoice(name, members[0]);
             if (resolved) queueTts(cleanedContent, resolved.voice, resolved.isNarration);
@@ -5440,7 +5451,7 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             let fullReplyForHistory = fullReply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
             fullReplyForHistory = fullReplyForHistory.replace(/<think>[\s\S]*/gi, '').trim();
             fullReplyForHistory = fullReplyForHistory.replace(/<\/think>/gi, '').trim();
-            chatHistory.push({ role: 'assistant', content: fullReplyForHistory });
+            chatHistory.push({ role: 'assistant', content: fullReplyForHistory + _choicesRawBlock });
             saveChatHistory();
             mIndex = chatHistory.length - 1;
         }
@@ -5560,7 +5571,7 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
         let fullReplyForHistory = fullReply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
         fullReplyForHistory = fullReplyForHistory.replace(/<think>[\s\S]*/gi, '').trim();
         fullReplyForHistory = fullReplyForHistory.replace(/<\/think>/gi, '').trim();
-        chatHistory.push({ role: 'assistant', content: fullReplyForHistory });
+        chatHistory.push({ role: 'assistant', content: fullReplyForHistory + _choicesRawBlock });
         saveChatHistory();
         msgIndex = chatHistory.length - 1;
     }
