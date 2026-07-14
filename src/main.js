@@ -1248,8 +1248,11 @@ function extractDialogue(text, isNarration) {
         return cleaned;
     }
 
-    // 通常モード（キャラ発言）: 「」『』""内のセリフだけ抽出
-    const bracketsRegex = /[「『""](.*?)[」』""]/g;
+    // 通常モード（キャラ発言）: 「」内の「実際に声に出すセリフ」だけ抽出。
+    // 『』（）※ 等（心の声・強調・作品名）は読み上げ対象外とする。
+    // ※ セリフと強調で同じ「」を使うと区別できないため、AI 側に
+    //    「発話は「」、強調・心の声は（）や※」と書き分けさせる directive を併用する。
+    const bracketsRegex = /「([^」]*)」/g;
     let matches = [];
     let match;
     while ((match = bracketsRegex.exec(text)) !== null) {
@@ -1262,12 +1265,43 @@ function extractDialogue(text, isNarration) {
         return matches.join(' ');
     }
 
-    // フォールバック: 「」がなければ装飾記号を除去した全文（旧来挙動）
+    // フォールバック: 「」がなければ装飾記号・心の声を除去した全文（旧来挙動）
     let cleaned = text;
     cleaned = cleaned.replace(/\*.*?\*/g, '');
     cleaned = cleaned.replace(/\(.*?\)/g, '');
     cleaned = cleaned.replace(/（.*?）/g, '');
+    cleaned = cleaned.replace(/『.*?』/g, ''); // 強調・作品名も除外
     return cleaned.trim();
+}
+
+// 長文を TTS 用に句読点・改行で分割する。
+// VOICEVOX は長文を1リクエストで投げると途中で切れるため、チャンク化して逐次再生する。
+// maxLen を超える単一文は読点(、)で強制分割し、それも無ければ maxLen で機械的に切る。
+function splitForTts(text, maxLen) {
+    if (!text) return [];
+    maxLen = maxLen || 120;
+    // 文末記号（。！？!? と改行）の直後で区切る
+    const sentences = text.split(/(?<=[。！？!?\n])/);
+    const chunks = [];
+    let buf = '';
+    for (let s of sentences) {
+        if (!s) continue;
+        if (buf && (buf + s).length > maxLen) {
+            chunks.push(buf);
+            buf = s;
+        } else {
+            buf += s;
+        }
+        // 単一文が maxLen 超 → 読点で分割、無ければ機械切り
+        while (buf.length > maxLen) {
+            let cut = buf.lastIndexOf('、', maxLen);
+            cut = (cut > 0) ? cut + 1 : maxLen;
+            chunks.push(buf.slice(0, cut));
+            buf = buf.slice(cut);
+        }
+    }
+    if (buf.trim()) chunks.push(buf);
+    return chunks.map(c => c.trim()).filter(c => c);
 }
 
 function playNextTts() {
@@ -1310,57 +1344,62 @@ async function speakTextCore(text, voiceConfig, onEnd, isNarration) {
     const speed = voiceConfig.speed !== undefined ? parseFloat(voiceConfig.speed) : 1.0;
 
     if (voiceConfig.engine === 'webspeech') {
-        const utterance = new SpeechSynthesisUtterance(dialogue);
-        if (voiceConfig.voiceURI) {
-            const voices = window.speechSynthesis.getVoices();
-            const voice = voices.find(v => v.voiceURI === voiceConfig.voiceURI);
-            if (voice) utterance.voice = voice;
-        }
-        utterance.pitch = pitch;
-        utterance.rate = speed;
-        
-        utterance.onend = () => {
-            if (onEnd) onEnd();
+        // 長文はチャンク分割して逐次発話（途中切れ防止）
+        const chunks = splitForTts(dialogue, 200);
+        let ci = 0;
+        const speakChunk = () => {
+            if (ci >= chunks.length) { if (onEnd) onEnd(); return; }
+            const utterance = new SpeechSynthesisUtterance(chunks[ci++]);
+            if (voiceConfig.voiceURI) {
+                const voices = window.speechSynthesis.getVoices();
+                const voice = voices.find(v => v.voiceURI === voiceConfig.voiceURI);
+                if (voice) utterance.voice = voice;
+            }
+            utterance.pitch = pitch;
+            utterance.rate = speed;
+            utterance.onend = () => speakChunk();
+            utterance.onerror = () => speakChunk(); // エラーでも次チャンクへ
+            window.speechSynthesis.speak(utterance);
         };
-        utterance.onerror = () => {
-            if (onEnd) onEnd();
-        };
-        
-        window.speechSynthesis.speak(utterance);
+        speakChunk();
     } else if (voiceConfig.engine === 'voicevox') {
         const speakerId = voiceConfig.speakerId !== undefined ? parseInt(voiceConfig.speakerId) : 0;
-        try {
-            const queryUrl = `http://localhost:50021/audio_query?text=${encodeURIComponent(dialogue)}&speaker=${speakerId}`;
-            const queryRes = await fetch(queryUrl, { method: 'POST' });
-            if (!queryRes.ok) throw new Error('VOICEVOX audio_query failed');
-            const queryJson = await queryRes.json();
-            
-            queryJson.pitchScale = pitch - 1.0;
-            queryJson.speedScale = speed;
-            
-            const synthUrl = `http://localhost:50021/synthesis?speaker=${speakerId}`;
-            const synthRes = await fetch(synthUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(queryJson)
-            });
-            if (!synthRes.ok) throw new Error('VOICEVOX synthesis failed');
-            const wavBlob = await synthRes.blob();
-            const audioUrl = URL.createObjectURL(wavBlob);
-            currentTtsAudio = new Audio(audioUrl);
-            
-            currentTtsAudio.onended = () => {
-                if (onEnd) onEnd();
-            };
-            currentTtsAudio.onerror = () => {
-                if (onEnd) onEnd();
-            };
-            
-            currentTtsAudio.play();
-        } catch (e) {
-            console.error('[TTS] VOICEVOX playback failed:', e.message);
-            if (onEnd) onEnd();
-        }
+        // 長文はチャンク分割して逐次合成・再生（VOICEVOX の途中切れ対策）
+        const chunks = splitForTts(dialogue, 120);
+        let ci = 0;
+        const playChunk = async () => {
+            if (ci >= chunks.length) { if (onEnd) onEnd(); return; }
+            const chunk = chunks[ci++];
+            try {
+                const queryUrl = `http://localhost:50021/audio_query?text=${encodeURIComponent(chunk)}&speaker=${speakerId}`;
+                const queryRes = await fetch(queryUrl, { method: 'POST' });
+                if (!queryRes.ok) throw new Error('VOICEVOX audio_query failed');
+                const queryJson = await queryRes.json();
+
+                queryJson.pitchScale = pitch - 1.0;
+                queryJson.speedScale = speed;
+
+                const synthUrl = `http://localhost:50021/synthesis?speaker=${speakerId}`;
+                const synthRes = await fetch(synthUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(queryJson)
+                });
+                if (!synthRes.ok) throw new Error('VOICEVOX synthesis failed');
+                const wavBlob = await synthRes.blob();
+                const audioUrl = URL.createObjectURL(wavBlob);
+                currentTtsAudio = new Audio(audioUrl);
+
+                currentTtsAudio.onended = () => { URL.revokeObjectURL(audioUrl); playChunk(); };
+                currentTtsAudio.onerror = () => { URL.revokeObjectURL(audioUrl); playChunk(); };
+
+                currentTtsAudio.play();
+            } catch (e) {
+                console.error('[TTS] VOICEVOX playback failed:', e.message);
+                playChunk(); // 失敗しても次チャンクへ進める
+            }
+        };
+        playChunk();
     }
 }
 
@@ -6843,6 +6882,19 @@ async function fetchChatCompletion(mode) {
         systemPrompt += '・🚨 必ず [CHOICES] で始め [/CHOICES] で閉じること。閉じタグを省略しないこと。\n';
         systemPrompt += '・Info Panel モードと併用する場合、[INFO]...[/INFO] ブロックの後に [CHOICES] を置くこと。\n';
         systemPrompt += '====================================================\n';
+    }
+
+    // ===== 音声読み上げ用の記法ルール（自動読み上げ ON 時のみ） =====
+    // セリフと強調で同じ「」を使うと TTS が両方読んでしまうため、書き分けを促す。
+    if (autoplayTts) {
+        systemPrompt += '\n\n========== 音声読み上げ用の記法ルール ==========\n';
+        systemPrompt += '音声合成(TTS)が有効です。読み上げ対象を明確にするため、次の書き分けを必ず守ってください。\n';
+        systemPrompt += '・キャラクターが実際に声に出す【セリフ】だけを「」で囲む（読み上げられるのはこの中身のみ）。\n';
+        systemPrompt += '・心の声・モノローグ・強調したい語句は「」を使わず、（）で囲むか ※ を付ける（読み上げ対象外）。\n';
+        systemPrompt += '・ナレーション・地の文・動作描写は「」で囲まない（そのまま地の文として書く）。\n';
+        systemPrompt += '例: 彼女は（本当は怖い……）と思いながらも「大丈夫、行こう」と笑ってみせた。\n';
+        systemPrompt += '  → 読み上げは「大丈夫、行こう」のみになる。\n';
+        systemPrompt += '================================================\n';
     }
 
     // ===== NPC 発言保証（複数キャラ・非banter時のみ） =====
