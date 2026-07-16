@@ -4892,7 +4892,9 @@ function renderChatFromHistory() {
         } else if (msg.isImage) {
             renderImagePlaceholder(idx, msg.content.replace('[Generated Image]\nPrompt: ', ''));
         } else if (msg.role === 'narrator') {
-            appendNarrationMessage(msg.content);
+            // idx を渡さないと msgIndex=-1 になり、編集/削除ボタンが
+            // editMessage/deleteMessage 冒頭の index<0 ガードで無効化される
+            appendNarrationMessage(msg.content, idx);
         } else if (msg.role === 'assistant') {
             // NOTE: 履歴復元時は常に allowUserSpeaker=false。
             // 内容文字列からの自動判定はフィルタを貫通させる不具合に繋がるため行わない。
