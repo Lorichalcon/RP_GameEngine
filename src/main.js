@@ -133,6 +133,11 @@ let imageMaxPerTurn     = parseInt(localStorage.getItem('imageMaxPerTurn')) || 2
 let imageCatalog        = loadCatalog();
 let _imgDirHandle       = null;   // 現在のディレクトリハンドル
 let _imgDirGranted      = false;  // 読み取り権限が有効か
+// チャット描画の世代トークン。チャット欄をクリアするたびに進める。
+// 画像挿入は非同期（ファイル読み出しを挟む）ため、待っている間に画面が
+// 作り直されたら結果を破棄する。これが無いと再描画のたびに画像が重複する。
+let _chatRenderToken    = 0;
+function bumpChatRenderToken() { _chatRenderToken++; }
 
 function saveImageCatalog() {
     return safeSetItem(getCatalogKey(), serializeCatalog(imageCatalog));
@@ -3488,7 +3493,9 @@ function appendImageMessage(base64, prompt, opts) {
     }
     msgDiv.appendChild(container);
     chatContainer.appendChild(msgDiv);
-    scrollToBottom();
+    // 事前登録画像は挿入位置を呼び出し側が調整するため、ここでは自動スクロールしない
+    // （過去メッセージへの挿入で画面が最下部へ飛ぶのを防ぐ）
+    if (!isUrl) scrollToBottom();
 
     return msgDiv;
 }
@@ -3502,6 +3509,7 @@ function appendImageMessage(base64, prompt, opts) {
  */
 async function appendLibraryImage(tag, forcedIndex = -1, opts) {
     const quiet = !!(opts && opts.quiet); // 履歴復元時は通知を抑制（大量に出るため）
+    const token = _chatRenderToken;       // 待機中に再描画されたかを判定するため控える
     const entry = findByTag(imageCatalog, tag);
     if (!entry) {
         console.warn('[ImageLib] unknown tag:', tag,
@@ -3531,6 +3539,9 @@ async function appendLibraryImage(tag, forcedIndex = -1, opts) {
         return null;
     }
 
+    // ファイル読み出しを待っている間に画面が作り直されていたら、この結果は捨てる
+    if (token !== _chatRenderToken) return null;
+
     let idx = forcedIndex;
     if (forcedIndex < 0) {
         chatHistory.push({
@@ -3542,8 +3553,31 @@ async function appendLibraryImage(tag, forcedIndex = -1, opts) {
         saveChatHistory();
         idx = chatHistory.length - 1;
     }
+
+    // 同じメッセージ・同じタグの画像が既にあるなら二重に出さない
+    const dupSel = '#chat-history .chat-msg.library-image[data-owner-index="' + idx + '"][data-img-tag="'
+        + (window.CSS && CSS.escape ? CSS.escape(tag) : tag) + '"]';
+    if (document.querySelector(dupSel)) return null;
+
     const div = appendImageMessage(url, entry.description || tag, { isUrl: true });
     div.setAttribute('data-index', idx);
+    div.setAttribute('data-owner-index', idx);
+    div.setAttribute('data-img-tag', tag);
+
+    // appendImageMessage はチャット末尾に足すため、所属メッセージの直後へ移動する。
+    // （非同期のため、そのままだと常に最後尾に付いてしまう）
+    const hist = document.getElementById('chat-history');
+    if (hist) {
+        // 本文タグ由来: 同じ index を持つ本文バブルの最後の要素の直後へ
+        let anchors = hist.querySelectorAll('.chat-msg[data-index="' + idx + '"]:not(.library-image)');
+        // 旧方式（画像が独立した履歴エントリ）の場合は直前のメッセージの後ろへ
+        if (anchors.length === 0 && idx > 0) {
+            anchors = hist.querySelectorAll('.chat-msg[data-index="' + (idx - 1) + '"]');
+        }
+        if (anchors.length > 0) {
+            anchors[anchors.length - 1].insertAdjacentElement('afterend', div);
+        }
+    }
     return div;
 }
 
@@ -4823,6 +4857,7 @@ function restoreChatFromStorage() {
         }
 
         // Restore visual messages — splitAndAppendCharMessages を使い SPEAKER タグを正しく解析
+        bumpChatRenderToken();
         document.getElementById('chat-history').innerHTML = '';
         chatHistory.forEach((msg, idx) => {
             if (msg.isImage && msg.imageTag) {
@@ -4854,6 +4889,7 @@ function restoreChatFromStorage() {
     } else if (pureChatMode) {
         // 純チャットの新規バケット: RP用イントロ（first_mes 等）は流さない
         chatHistory = [];
+        bumpChatRenderToken();
         const hist = document.getElementById('chat-history');
         if (hist) hist.innerHTML = '';
         updateRegenButtonVisibility();
@@ -4930,6 +4966,7 @@ function initializeChat(charArray) {
     resetContextSummary();
     clearChoiceButtons();
     clearInfoPanel();
+    bumpChatRenderToken();
     document.getElementById('chat-history').innerHTML = '';
     
     const members = getActivePartyMembers();
@@ -5277,6 +5314,7 @@ function deleteMessage(index, charName = null) {
 
 function renderChatFromHistory() {
     const container = document.getElementById('chat-history');
+    bumpChatRenderToken(); // 進行中の非同期画像挿入を無効化（重複防止）
     container.innerHTML = '';
 
     // 再描画時: status_values を履歴中の最新 statusSnapshot に同期
@@ -5770,7 +5808,10 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
         _extractedImgTags = []; // 二重挿入防止
         const idx = (typeof ownerIdx === 'number' && ownerIdx >= 0) ? ownerIdx : 0;
         // forcedIndex を渡すので履歴には push されない（タグが唯一の情報源）
-        (async () => { for (const t of tags) await appendLibraryImage(t, idx, { quiet: !shouldSave }); })();
+        (async () => {
+            for (const t of tags) await appendLibraryImage(t, idx, { quiet: !shouldSave });
+            if (shouldSave) scrollToBottom(); // 新規生成時のみ最新位置へ
+        })();
     };
 
     // Universe Report 検出 → 「学習量: 低い」なら世界観名で自動 Web Search → AI Memo へ記録 (非同期)
@@ -8244,6 +8285,7 @@ async function startQuest(quest) {
     chatHistory = [];
     resetContextSummary();
     clearInfoPanel();
+    bumpChatRenderToken();
     document.getElementById('chat-history').innerHTML = '';
     saveChatHistory();
 
