@@ -5190,50 +5190,23 @@ function editMessage(msgDiv, index) {
     textNode.appendChild(saveBtn);
     textNode.appendChild(cancelBtn);
     
-    saveBtn.onclick = async () => {
-        let newText = textarea.value;
-
-        // 手動で {img:タグ} を書き足した場合、その場で画像を挿入する。
-        // （通常生成時のタグ解析は splitAndAppendCharMessages 側で行われるため、
-        //   編集経由ではここで拾わないと画像が出ない）
-        let insertedTags = [];
-        {
-            const imgResult = parseImageTags(newText);
-            if (imgResult.tags.length > 0) {
-                if (imageLibraryEnabled) {
-                    newText = imgResult.cleanedContent;          // 本文からタグを除去
-                    insertedTags = imgResult.tags.slice(0, Math.max(1, imageMaxPerTurn));
-                } else {
-                    showToast('🖼️ 画像タグを検出しましたが機能が OFF です — Settings → 画像ライブラリ を有効にしてください', 'error');
-                }
-            }
+    saveBtn.onclick = () => {
+        const newText = textarea.value;
+        // {img:タグ} は本文にそのまま保存する。
+        // 画像は再描画時に splitAndAppendCharMessages がタグから解決するため、
+        // ここで除去や画像エントリの挿入は行わない（編集画面でタグ位置が見えるようにするため）。
+        const imgTags = parseImageTags(newText).tags;
+        if (imgTags.length > 0 && !imageLibraryEnabled) {
+            showToast('🖼️ 画像タグを検出しましたが機能が OFF です — Settings → 画像ライブラリ を有効にしてください', 'error');
         }
 
         chatHistory[index].content = newText;
-
-        // 検出したタグを、編集したメッセージの直後に画像エントリとして差し込む
-        if (insertedTags.length > 0) {
-            const newEntries = insertedTags
-                .filter(t => {
-                    if (findByTag(imageCatalog, t)) return true;
-                    showToast('🖼️ 未登録のタグ「' + t + '」', 'error');
-                    return false;
-                })
-                .map(t => ({
-                    role: 'assistant',
-                    content: '[Library Image]\nTag: ' + t,
-                    isImage: true,
-                    imageTag: t
-                }));
-            if (newEntries.length > 0) chatHistory.splice(index + 1, 0, ...newEntries);
-        }
-
         saveChatHistory();
         // Full re-render is safest for visual consistency
         renderChatFromHistory();
 
-        // 権限が無いと復元経路は静かに失敗するため、復帰ボタンを出す
-        if (insertedTags.length > 0 && _imgDirHandle && !_imgDirGranted) {
+        // 権限が無いと画像解決は静かに失敗するため、復帰ボタンを出す
+        if (imgTags.length > 0 && imageLibraryEnabled && _imgDirHandle && !_imgDirGranted) {
             showImagePermissionBanner();
         }
     };
@@ -5768,27 +5741,36 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
     fullReply = parseAndStoreAiMemoTags(fullReply);
 
     // {img:tag} を抽出（本文からは常に除去し、有効時のみ描画後に画像バブルを挿入）
+    // {img:tag} は「本文に残したまま、表示のときだけ隠す」方式。
+    // 履歴には原文（タグ付き）を保存するので、編集画面でタグの位置が見え、移動もできる。
     let _extractedImgTags = [];
+    const _replyWithImgTags = fullReply; // 履歴保存用（タグを残した原文）
     {
         const imgResult = parseImageTags(fullReply);
         if (imgResult.tags.length > 0) {
-            fullReply = imgResult.cleanedContent;
+            fullReply = imgResult.cleanedContent; // 表示用（タグを除去）
             if (imageLibraryEnabled) {
                 _extractedImgTags = imgResult.tags.slice(0, Math.max(1, imageMaxPerTurn));
             } else if (shouldSave) {
-                // タグは本文から消えるのに画像が出ない＝機能OFFのまま、という状況は
+                // タグは表示から消えるのに画像が出ない＝機能OFFのまま、という状況は
                 // 見分けが付かないため明示的に知らせる
                 console.warn('[ImageLib] タグを検出しましたが画像ライブラリが無効です:', imgResult.tags.join(', '));
                 showToast('🖼️ 画像タグを検出しましたが機能が OFF です — Settings → 画像ライブラリ を有効にしてください', 'error');
             }
         }
     }
-    // 全メッセージ描画後に画像を順次挿入する（4つの return 経路から共通で呼ぶ）
-    const _flushLibraryImages = () => {
+    /**
+     * 本文中のタグに対応する画像を、メッセージ描画後に挿入する。
+     * 新規生成でも再描画でも動く（画像は履歴エントリを増やさず、タグから毎回解決する）。
+     * @param {number} ownerIdx 画像を紐付けるメッセージの履歴インデックス
+     */
+    const _flushLibraryImages = (ownerIdx) => {
         if (!_extractedImgTags.length) return;
         const tags = _extractedImgTags;
         _extractedImgTags = []; // 二重挿入防止
-        (async () => { for (const t of tags) await appendLibraryImage(t); })();
+        const idx = (typeof ownerIdx === 'number' && ownerIdx >= 0) ? ownerIdx : 0;
+        // forcedIndex を渡すので履歴には push されない（タグが唯一の情報源）
+        (async () => { for (const t of tags) await appendLibraryImage(t, idx, { quiet: !shouldSave }); })();
     };
 
     // Universe Report 検出 → 「学習量: 低い」なら世界観名で自動 Web Search → AI Memo へ記録 (非同期)
@@ -5846,7 +5828,8 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             const { cleanedContent } = parseStatusTag(fullReply);
             let mIdx = forcedIndex;
             if (shouldSave) {
-                const clean = fullReply.replace(/<\/?think>/gi, '').trim();
+                // 履歴には {img:} タグを残した原文を保存（編集画面で位置が見えるように）
+                const clean = _replyWithImgTags.replace(/<\/?think>/gi, '').trim();
                 chatHistory.push({ role: 'assistant', content: clean + _choicesRawBlock });
                 saveChatHistory();
                 mIdx = chatHistory.length - 1;
@@ -5862,7 +5845,7 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
                 if (snap) { chatHistory[mIdx].statusSnapshot = snap; saveChatHistory(); }
                 updateStatusHUD();
             }
-            if (shouldSave) _flushLibraryImages();
+            _flushLibraryImages(mIdx); // 再描画時も本文タグから画像を復元する
             if (shouldSave && _extractedChoices && _extractedChoices.length > 0) {
                 renderChoiceButtons(_extractedChoices);
             }
@@ -5892,10 +5875,16 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             ? (existingSnapshot && existingSnapshot[name]) || null
             : getStatusValueForSpeaker(name);
         appendMessage('char', applyMacros(cleanedContent, name), name, shouldSave, forcedIndex, statusForSpeaker);
-        // 選択肢ブロックを履歴に残す（appendMessage は内部で push 済みなので末尾エントリへ追記）
-        if (shouldSave && _choicesRawBlock && chatHistory.length > 0) {
-            chatHistory[chatHistory.length - 1].content += _choicesRawBlock;
-            saveChatHistory();
+        // 選択肢ブロック / 画像タグを履歴に残す
+        // （この経路は appendMessage が表示用テキストを push するため、末尾エントリへ追記して復元する）
+        if (shouldSave && chatHistory.length > 0) {
+            const imgSuffix = _extractedImgTags.length
+                ? '\n' + _extractedImgTags.map(t => '{img:' + t + '}').join('')
+                : '';
+            if (_choicesRawBlock || imgSuffix) {
+                chatHistory[chatHistory.length - 1].content += imgSuffix + _choicesRawBlock;
+                saveChatHistory();
+            }
         }
         if (shouldSave && autoplayTts) {
             const resolved = resolveTtsVoice(name, members[0]);
@@ -5916,7 +5905,7 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             saveChatHistory();
         }
         // 事前登録画像 → 選択肢ボタンの順で描画（1人構成・SPEAKER タグなし経路）
-        if (shouldSave) _flushLibraryImages();
+        _flushLibraryImages(shouldSave ? (chatHistory.length - 1) : forcedIndex);
         if (shouldSave && _extractedChoices && _extractedChoices.length > 0) {
             renderChoiceButtons(_extractedChoices);
         }
@@ -5950,7 +5939,8 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
 
         let mIndex = forcedIndex;
         if (shouldSave) {
-            let fullReplyForHistory = fullReply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            // 履歴には {img:} タグを残した原文を保存（編集画面で位置が見えるように）
+            let fullReplyForHistory = _replyWithImgTags.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
             fullReplyForHistory = fullReplyForHistory.replace(/<think>[\s\S]*/gi, '').trim();
             fullReplyForHistory = fullReplyForHistory.replace(/<\/think>/gi, '').trim();
             chatHistory.push({ role: 'assistant', content: fullReplyForHistory + _choicesRawBlock });
@@ -6008,7 +5998,7 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             updateStatusHUD();
         }
         // 事前登録画像 → 選択肢描画（名前プレフィックス・フォールバック経路）
-        if (!renderMode) _flushLibraryImages();
+        _flushLibraryImages(mIndex);
         if (!renderMode && _extractedChoices && _extractedChoices.length > 0) {
             renderChoiceButtons(_extractedChoices);
         }
@@ -6071,7 +6061,8 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
 
     let msgIndex = forcedIndex;
     if (shouldSave) {
-        let fullReplyForHistory = fullReply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        // 履歴には {img:} タグを残した原文を保存（編集画面で位置が見えるように）
+        let fullReplyForHistory = _replyWithImgTags.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
         fullReplyForHistory = fullReplyForHistory.replace(/<think>[\s\S]*/gi, '').trim();
         fullReplyForHistory = fullReplyForHistory.replace(/<\/think>/gi, '').trim();
         chatHistory.push({ role: 'assistant', content: fullReplyForHistory + _choicesRawBlock });
@@ -6172,8 +6163,8 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
         updateStatusHUD();
     }
 
-    // 新規生成: 事前登録画像 → 選択肢ボタンの順で描画（タグベース解析経路）
-    if (!renderMode) _flushLibraryImages();
+    // 事前登録画像 → 選択肢ボタンの順で描画（タグベース解析経路）
+    _flushLibraryImages(msgIndex);
     if (!renderMode && _extractedChoices && _extractedChoices.length > 0) {
         renderChoiceButtons(_extractedChoices);
     }
