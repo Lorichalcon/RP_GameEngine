@@ -358,6 +358,55 @@ function setupImageLibraryView() {
         });
     }
 
+    // 🩺 表示診断: 画像が出ない原因を上から順に潰して特定する
+    const diagBtn = document.getElementById('imglib-diagnose-btn');
+    if (diagBtn && !diagBtn._bound) {
+        diagBtn._bound = true;
+        diagBtn.addEventListener('click', async () => {
+            const lines = [];
+            const fail = (msg) => { lines.push('❌ ' + msg); };
+            const ok   = (msg) => { lines.push('✅ ' + msg); };
+
+            // 1. ブラウザ対応
+            if (!isImageLibrarySupported()) fail('このブラウザは非対応です（Chrome / Edge が必要）');
+            else ok('ブラウザ対応OK');
+
+            // 2. 機能の有効化（← 最も多い原因）
+            if (!imageLibraryEnabled) fail('画像ライブラリが【無効】です → Settings → 🖼️ 画像ライブラリ を ON にして「Save Settings」');
+            else ok('画像ライブラリ 有効');
+
+            // 3. フォルダ選択
+            if (!_imgDirHandle) fail('画像フォルダが未選択です → 「📂 画像フォルダを選択」');
+            else ok('フォルダ: ' + _imgDirHandle.name);
+
+            // 4. 読み取り許可（ここで対話的に要求する）
+            if (_imgDirHandle) {
+                const granted = await ensureImageDirPermission();
+                if (!granted) fail('フォルダの読み取り許可がありません（ダイアログで「許可」を選んでください）');
+                else ok('読み取り許可あり');
+            }
+
+            // 5. カタログ件数
+            if (!imageCatalog.length) fail('カタログが空です → 「🔄 再スキャン」');
+            else ok('登録 ' + imageCatalog.length + ' 件');
+
+            // 6. 先頭エントリの実ファイル読み出しテスト
+            if (_imgDirHandle && _imgDirGranted && imageCatalog.length) {
+                const e = imageCatalog[0];
+                const url = await getImageUrl(_imgDirHandle, e.file, e.subDir);
+                if (!url) fail('ファイルを読めません: ' + (e.subDir ? e.subDir + '/' : '') + e.file);
+                else ok('ファイル読み出しOK（' + e.tag + '）');
+            }
+
+            console.log('[ImageLib] 診断結果:\n' + lines.join('\n'));
+            const firstFail = lines.find(l => l.startsWith('❌'));
+            showToast(firstFail
+                ? firstFail.replace('❌ ', '🩺 ')
+                : '🩺 すべて正常です。チャットで {img:' + (imageCatalog[0] ? imageCatalog[0].tag : 'タグ名') + '} を試してください',
+                firstFail ? 'error' : 'success');
+        });
+    }
+
     renderImageLibraryTable();
     updateImageLibraryStatus();
 }
@@ -5148,11 +5197,15 @@ function editMessage(msgDiv, index) {
         // （通常生成時のタグ解析は splitAndAppendCharMessages 側で行われるため、
         //   編集経由ではここで拾わないと画像が出ない）
         let insertedTags = [];
-        if (imageLibraryEnabled) {
+        {
             const imgResult = parseImageTags(newText);
             if (imgResult.tags.length > 0) {
-                newText = imgResult.cleanedContent;              // 本文からタグを除去
-                insertedTags = imgResult.tags.slice(0, Math.max(1, imageMaxPerTurn));
+                if (imageLibraryEnabled) {
+                    newText = imgResult.cleanedContent;          // 本文からタグを除去
+                    insertedTags = imgResult.tags.slice(0, Math.max(1, imageMaxPerTurn));
+                } else {
+                    showToast('🖼️ 画像タグを検出しましたが機能が OFF です — Settings → 画像ライブラリ を有効にしてください', 'error');
+                }
             }
         }
 
@@ -5722,6 +5775,11 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             fullReply = imgResult.cleanedContent;
             if (imageLibraryEnabled) {
                 _extractedImgTags = imgResult.tags.slice(0, Math.max(1, imageMaxPerTurn));
+            } else if (shouldSave) {
+                // タグは本文から消えるのに画像が出ない＝機能OFFのまま、という状況は
+                // 見分けが付かないため明示的に知らせる
+                console.warn('[ImageLib] タグを検出しましたが画像ライブラリが無効です:', imgResult.tags.join(', '));
+                showToast('🖼️ 画像タグを検出しましたが機能が OFF です — Settings → 画像ライブラリ を有効にしてください', 'error');
             }
         }
     }
