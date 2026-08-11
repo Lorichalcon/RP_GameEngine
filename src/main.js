@@ -2115,7 +2115,10 @@ async function init() {
     setupSummaryPanel();
     setupPureChatToggle();
     setupImageLibraryView();
-    restoreImageDirHandle(); // 保存済みフォルダハンドルを非同期復元
+    // 画像フォルダのハンドル復元は必ず待つ。
+    // await しないと、後続の restoreChatFromStorage() が走る時点で _imgDirHandle が
+    // まだ null のため、本文タグ由来の画像がリロード時に表示されなくなる。
+    await restoreImageDirHandle();
     updateQuestHUD();
     updateImggenButtonVisibility();
     
@@ -3556,29 +3559,41 @@ async function appendLibraryImage(tag, forcedIndex = -1, opts) {
         idx = chatHistory.length - 1;
     }
 
-    // 同じメッセージ・同じタグの画像が既にあるなら二重に出さない
-    const dupSel = '#chat-history .chat-msg.library-image[data-owner-index="' + idx + '"][data-img-tag="'
-        + (window.CSS && CSS.escape ? CSS.escape(tag) : tag) + '"]';
+    const esc = (window.CSS && CSS.escape) ? CSS.escape(tag) : tag;
+    const hist = document.getElementById('chat-history');
+
+    // 本文タグ由来なら、対応するメッセージの吹き出しの中に埋め込む
+    const ownerBubbles = hist
+        ? hist.querySelectorAll('.chat-msg[data-index="' + idx + '"]:not(.image-msg)')
+        : [];
+    if (ownerBubbles.length > 0) {
+        const target = ownerBubbles[ownerBubbles.length - 1].querySelector('.msg-content');
+        if (target) {
+            // 同じ吹き出しに同じタグの画像が既にあるなら二重に出さない
+            if (target.querySelector('.library-inline-image[data-img-tag="' + esc + '"]')) return null;
+            const im = document.createElement('img');
+            im.className = 'library-inline-image';
+            im.src = url;
+            im.alt = entry.description || tag;
+            im.setAttribute('data-img-tag', tag);
+            target.appendChild(im);
+            return im;
+        }
+    }
+
+    // 対応する吹き出しが無い場合（旧方式の独立エントリ・クエストイベント画像）は
+    // 従来どおり単独の画像ブロックとして表示する
+    const dupSel = '#chat-history .chat-msg.library-image[data-owner-index="' + idx + '"][data-img-tag="' + esc + '"]';
     if (document.querySelector(dupSel)) return null;
 
     const div = appendImageMessage(url, entry.description || tag, { isUrl: true });
     div.setAttribute('data-index', idx);
     div.setAttribute('data-owner-index', idx);
     div.setAttribute('data-img-tag', tag);
-
-    // appendImageMessage はチャット末尾に足すため、所属メッセージの直後へ移動する。
-    // （非同期のため、そのままだと常に最後尾に付いてしまう）
-    const hist = document.getElementById('chat-history');
-    if (hist) {
-        // 本文タグ由来: 同じ index を持つ本文バブルの最後の要素の直後へ
-        let anchors = hist.querySelectorAll('.chat-msg[data-index="' + idx + '"]:not(.library-image)');
-        // 旧方式（画像が独立した履歴エントリ）の場合は直前のメッセージの後ろへ
-        if (anchors.length === 0 && idx > 0) {
-            anchors = hist.querySelectorAll('.chat-msg[data-index="' + (idx - 1) + '"]');
-        }
-        if (anchors.length > 0) {
-            anchors[anchors.length - 1].insertAdjacentElement('afterend', div);
-        }
+    // 独立エントリは自分の並び順（直前メッセージの後ろ）へ移動する
+    if (hist && idx > 0) {
+        const prev = hist.querySelectorAll('.chat-msg[data-index="' + (idx - 1) + '"]');
+        if (prev.length > 0) prev[prev.length - 1].insertAdjacentElement('afterend', div);
     }
     return div;
 }

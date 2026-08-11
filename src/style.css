@@ -3623,3 +3623,20 @@ main {
   white-space: nowrap;
 }
 #imglib-permission-btn:hover { background: #ffb851; }
+
+/* 事前登録画像: メッセージ吹き出しの中に埋め込む表示 */
+.library-inline-image {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  width: auto;
+  height: auto;
+  margin-top: 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  object-fit: contain;
+  cursor: zoom-in;
+}
+@media (max-width: 768px) {
+  .library-inline-image { max-height: 300px; }
+}
