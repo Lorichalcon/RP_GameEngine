@@ -3485,9 +3485,11 @@ function appendImageMessage(base64, prompt, opts) {
     });
 
     container.appendChild(img);
-    container.appendChild(promptText);
-    // 事前登録画像は SD 再生成の対象外なので、生成系ボタンは付けない
+    // 事前登録画像の説明文は「AI がどの画像を選ぶかの手がかり」であり、
+    // 読者に見せるキャプションではないので表示しない（alt 属性には残す）。
     if (!isUrl) {
+        container.appendChild(promptText);
+        // 事前登録画像は SD 再生成の対象外なので、生成系ボタンも付けない
         container.appendChild(regenBtn);
         container.appendChild(editPromptBtn);
     }
