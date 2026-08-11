@@ -3494,3 +3494,107 @@ main {
   box-shadow: 0 0 6px rgba(76, 175, 80, 0.9);
   pointer-events: none;
 }
+
+/* ======== 🖼️ 画像ライブラリ管理 view ======== */
+.imglib-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 0.75rem;
+}
+.imglib-toolbar button { padding: 8px 14px; font-size: 0.88rem; }
+
+.imglib-status {
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 3px solid var(--text-secondary, #888);
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+}
+.imglib-status[data-state="ok"]    { border-left-color: #4caf50; }
+.imglib-status[data-state="warn"]  { border-left-color: #ffa726; }
+.imglib-status[data-state="error"] { border-left-color: #f44336; }
+
+.imglib-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  max-height: 58vh;
+  overflow-y: auto;
+}
+.imglib-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.imglib-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(30, 32, 48, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+.imglib-table tbody td {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  vertical-align: middle;
+}
+.imglib-table tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+
+.imglib-thumb {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  display: block;
+}
+
+.imglib-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.83rem;
+}
+.imglib-input:focus {
+  outline: none;
+  border-color: var(--accent-color, #7c4dff);
+}
+
+.imglib-del-btn {
+  background: rgba(244, 67, 54, 0.15);
+  border: 1px solid rgba(244, 67, 54, 0.35);
+  color: #ff7a70;
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s;
+}
+.imglib-del-btn:hover { background: rgba(244, 67, 54, 0.3); }
+
+.imglib-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 1.5rem 0 !important;
+}
+
+@media (max-width: 768px) {
+  .imglib-table { font-size: 0.78rem; }
+  .imglib-thumb { width: 40px; height: 40px; }
+}

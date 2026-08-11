@@ -60,6 +60,26 @@ export function parseChoicesTag(content) {
 }
 
 /**
+ * AI応答から {img:tag_name} を抽出し、本文からは除去する。
+ * 事前登録画像ライブラリ（Layer 2）のトリガー。
+ * 戻り値: { tags: string[], cleanedContent: string }
+ */
+export function parseImageTags(content) {
+    if (!content) return { tags: [], cleanedContent: content || '' };
+    const re = /\{img:\s*([a-zA-Z0-9_\-ぁ-んァ-ヶ一-龠]+)\s*\}/g;
+    const tags = [];
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        const t = m[1].trim();
+        if (t) tags.push(t);
+    }
+    if (tags.length === 0) return { tags: [], cleanedContent: content };
+    // タグ除去後に残る余分な空白・空行を軽く整える
+    const cleaned = content.replace(re, '').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+    return { tags, cleanedContent: cleaned };
+}
+
+/**
  * 暴走リピート（degenerate repetition loop）を圧縮する。
  * LLM が「ろ、ろ、ろ、…」のように同じ短い単位を延々繰り返す現象の後処理。
  * 同一の短い単位（1〜12文字）が threshold 回以上連続したら、3回 + 省略記号に畳む。

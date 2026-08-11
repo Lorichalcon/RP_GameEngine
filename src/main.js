@@ -1,5 +1,11 @@
 import './style.css'
-import { parseChoicesTag, parseInfoTag, collapseRunawayRepetition, looksRunawayRepetition } from './parsers.js'
+import { parseChoicesTag, parseInfoTag, collapseRunawayRepetition, looksRunawayRepetition, parseImageTags } from './parsers.js'
+import {
+    isImageLibrarySupported, saveDirHandle, loadDirHandle, clearDirHandle, verifyPermission,
+    pickImageFolder, scanImageFiles, getImageUrl, revokeAllImageUrls,
+    loadCatalog, serializeCatalog, getCatalogKey, findByTag,
+    mergeScanIntoCatalog, findDuplicateTags
+} from './imageLibrary.js'
 
 // ======== コンテキストウィンドウ設定 ========
 // LLMへの送信時に保持するチャット履歴のターン数（user+assistantの1往復=1ターン）。
@@ -118,6 +124,216 @@ let streamingEnabled = localStorage.getItem('streamingEnabled') !== '0'; // デ�
 let pureChatMode = localStorage.getItem('pureChatMode') === '1';
 let pureChatSystemPrompt = localStorage.getItem('pureChatSystemPrompt')
     || 'あなたは親切で有能なAIアシスタントです。ユーザーの言語に合わせて自然に応答してください。';
+
+// ======== 🖼️ 事前登録画像ライブラリ ========
+// 画像実体はローカルフォルダ参照（File System Access API）、カタログのみ localStorage。
+let imageLibraryEnabled = localStorage.getItem('imageLibraryEnabled') === '1';
+let imageTagInjectMax   = parseInt(localStorage.getItem('imageTagInjectMax')) || 60;
+let imageMaxPerTurn     = parseInt(localStorage.getItem('imageMaxPerTurn')) || 2;
+let imageCatalog        = loadCatalog();
+let _imgDirHandle       = null;   // 現在のディレクトリハンドル
+let _imgDirGranted      = false;  // 読み取り権限が有効か
+
+function saveImageCatalog() {
+    return safeSetItem(getCatalogKey(), serializeCatalog(imageCatalog));
+}
+
+/** 起動時: 保存済みハンドルを復元（権限は非対話で確認。'prompt' なら要ユーザー操作） */
+async function restoreImageDirHandle() {
+    if (!isImageLibrarySupported()) return;
+    const handle = await loadDirHandle();
+    if (!handle) return;
+    _imgDirHandle = handle;
+    _imgDirGranted = await verifyPermission(handle, false);
+    updateImageLibraryStatus();
+}
+
+function updateImageLibraryStatus() {
+    const el = document.getElementById('imglib-status');
+    if (!el) return;
+    if (!isImageLibrarySupported()) {
+        el.textContent = '⚠️ このブラウザは非対応です（Chrome / Edge が必要。https または localhost で開いてください）';
+        el.dataset.state = 'error';
+        return;
+    }
+    if (!_imgDirHandle) {
+        el.textContent = 'フォルダが未選択です。「📂 画像フォルダを選択」から選んでください。';
+        el.dataset.state = 'none';
+        return;
+    }
+    const dupCount = findDuplicateTags(imageCatalog).length;
+    el.innerHTML = '📂 <strong>' + escapeHTML(_imgDirHandle.name) + '</strong>'
+        + '　|　登録 <strong>' + imageCatalog.length + '</strong> 件'
+        + (dupCount > 0 ? '　|　<span style="color:#ffa726;">⚠️ タグ重複 ' + dupCount + ' 件</span>' : '')
+        + (_imgDirGranted
+            ? '　|　<span style="color:#4caf50;">読み取り許可あり</span>'
+            : '　|　<span style="color:#ffa726;">許可の再取得が必要（操作時に確認されます）</span>');
+    el.dataset.state = _imgDirGranted ? 'ok' : 'warn';
+}
+
+/** 権限が無ければ対話的に要求する（ユーザー操作起点で呼ぶこと） */
+async function ensureImageDirPermission() {
+    if (!_imgDirHandle) return false;
+    if (_imgDirGranted) return true;
+    _imgDirGranted = await verifyPermission(_imgDirHandle, true);
+    updateImageLibraryStatus();
+    return _imgDirGranted;
+}
+
+function renderImageLibraryTable() {
+    const tbody = document.getElementById('imglib-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (!imageCatalog.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="imglib-empty">まだ登録がありません。</td></tr>';
+        return;
+    }
+    imageCatalog.forEach((entry, idx) => {
+        const tr = document.createElement('tr');
+
+        // サムネイル（遅延読込: 権限があるときのみ）
+        const tdThumb = document.createElement('td');
+        const img = document.createElement('img');
+        img.className = 'imglib-thumb';
+        img.alt = entry.tag;
+        tdThumb.appendChild(img);
+        if (_imgDirGranted) {
+            getImageUrl(_imgDirHandle, entry.file, entry.subDir).then(url => { if (url) img.src = url; });
+        }
+        tr.appendChild(tdThumb);
+
+        const mkInput = (value, field, placeholder) => {
+            const td = document.createElement('td');
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.value = value || '';
+            inp.placeholder = placeholder || '';
+            inp.className = 'imglib-input';
+            inp.addEventListener('input', () => { imageCatalog[idx][field] = inp.value; });
+            td.appendChild(inp);
+            return td;
+        };
+
+        tr.appendChild(mkInput(entry.tag, 'tag', 'tag_name'));
+        tr.appendChild(mkInput(entry.description, 'description', '例: 照れて笑っている'));
+        tr.appendChild(mkInput(entry.character, 'character', 'キャラ名（任意）'));
+
+        // レイヤー
+        const tdLayer = document.createElement('td');
+        const sel = document.createElement('select');
+        sel.className = 'imglib-input';
+        [['reactive', 'reactive'], ['state', 'state']].forEach(([v, label]) => {
+            const o = document.createElement('option');
+            o.value = v; o.textContent = label;
+            sel.appendChild(o);
+        });
+        sel.value = entry.layer || 'reactive';
+        sel.addEventListener('change', () => { imageCatalog[idx].layer = sel.value; });
+        tdLayer.appendChild(sel);
+        tr.appendChild(tdLayer);
+
+        tr.appendChild(mkInput(entry.eventId, 'eventId', '例: 3'));
+
+        // 削除
+        const tdDel = document.createElement('td');
+        const del = document.createElement('button');
+        del.className = 'imglib-del-btn';
+        del.textContent = '🗑';
+        del.title = 'この登録を削除（ファイル自体は消えません）';
+        del.addEventListener('click', () => {
+            imageCatalog.splice(idx, 1);
+            saveImageCatalog();
+            renderImageLibraryTable();
+            updateImageLibraryStatus();
+        });
+        tdDel.appendChild(del);
+        tr.appendChild(tdDel);
+
+        tbody.appendChild(tr);
+    });
+}
+
+function setupImageLibraryView() {
+    const pickBtn   = document.getElementById('imglib-pick-folder-btn');
+    const rescanBtn = document.getElementById('imglib-rescan-btn');
+    const charBtn   = document.getElementById('imglib-set-char-btn');
+    const dupBtn    = document.getElementById('imglib-check-dup-btn');
+    const saveBtn   = document.getElementById('imglib-save-btn');
+
+    if (pickBtn && !pickBtn._bound) {
+        pickBtn._bound = true;
+        pickBtn.addEventListener('click', async () => {
+            try {
+                revokeAllImageUrls();
+                _imgDirHandle = await pickImageFolder();
+                _imgDirGranted = true;
+                const scanned = await scanImageFiles(_imgDirHandle);
+                const { catalog, added } = mergeScanIntoCatalog(imageCatalog, scanned);
+                imageCatalog = catalog;
+                saveImageCatalog();
+                renderImageLibraryTable();
+                updateImageLibraryStatus();
+                showToast('📂 ' + scanned.length + ' 件の画像を検出（新規 ' + added + ' 件を追加）');
+            } catch (e) {
+                if (e && e.name === 'AbortError') return; // ユーザーがキャンセル
+                showToast('フォルダを選択できません: ' + e.message, 'error');
+            }
+        });
+    }
+
+    if (rescanBtn && !rescanBtn._bound) {
+        rescanBtn._bound = true;
+        rescanBtn.addEventListener('click', async () => {
+            if (!_imgDirHandle) { showToast('先にフォルダを選択してください', 'error'); return; }
+            if (!(await ensureImageDirPermission())) { showToast('読み取り許可が得られませんでした', 'error'); return; }
+            try {
+                const scanned = await scanImageFiles(_imgDirHandle);
+                const { catalog, added } = mergeScanIntoCatalog(imageCatalog, scanned);
+                imageCatalog = catalog;
+                saveImageCatalog();
+                renderImageLibraryTable();
+                updateImageLibraryStatus();
+                showToast(added > 0 ? '🔄 新規 ' + added + ' 件を追加しました' : '🔄 新しい画像はありませんでした');
+            } catch (e) {
+                showToast('スキャン失敗: ' + e.message, 'error');
+            }
+        });
+    }
+
+    if (charBtn && !charBtn._bound) {
+        charBtn._bound = true;
+        charBtn.addEventListener('click', () => {
+            let n = 0;
+            imageCatalog.forEach(e => { if (e.subDir && !e.character) { e.character = e.subDir; n++; } });
+            saveImageCatalog();
+            renderImageLibraryTable();
+            showToast(n > 0 ? '👥 ' + n + ' 件にキャラ名を設定しました' : '対象がありませんでした（既に設定済み）');
+        });
+    }
+
+    if (dupBtn && !dupBtn._bound) {
+        dupBtn._bound = true;
+        dupBtn.addEventListener('click', () => {
+            const dups = findDuplicateTags(imageCatalog);
+            showToast(dups.length ? '⚠️ 重複タグ: ' + dups.join(', ') : '✅ タグの重複はありません',
+                      dups.length ? 'error' : 'success');
+            updateImageLibraryStatus();
+        });
+    }
+
+    if (saveBtn && !saveBtn._bound) {
+        saveBtn._bound = true;
+        saveBtn.addEventListener('click', () => {
+            if (saveImageCatalog()) {
+                updateImageLibraryStatus();
+                showToast('💾 カタログを保存しました（' + imageCatalog.length + ' 件）');
+            }
+        });
+    }
+
+    renderImageLibraryTable();
+    updateImageLibraryStatus();
+}
 
 function updatePureChatToggleUI() {
     const btn = document.getElementById('pure-chat-toggle');
@@ -1817,6 +2033,8 @@ async function init() {
     setupSpeechInput();
     setupSummaryPanel();
     setupPureChatToggle();
+    setupImageLibraryView();
+    restoreImageDirHandle(); // 保存済みフォルダハンドルを非同期復元
     updateQuestHUD();
     updateImggenButtonVisibility();
     
@@ -1937,6 +2155,13 @@ function setupNavigation() {
                     if (typeof stopLivingWorldTimer === 'function') stopLivingWorldTimer();
                     // 音声入力もチャット離脱時は停止（マイク開放）
                     if (_sttActive) stopSTT();
+                    // 画像ライブラリ画面: 入るたびにサムネイル・状態を最新化
+                    if (targetId === 'image-library-view') {
+                        ensureImageDirPermission().then(() => {
+                            renderImageLibraryTable();
+                            updateImageLibraryStatus();
+                        });
+                    }
                 }
             }
         });
@@ -1962,7 +2187,7 @@ function setupNavigation() {
     navItems.forEach(item => item.addEventListener('click', closeDrawer));
 
     // Alt+1〜7 でビュー高速切替（入力中でも Alt 併用なので誤爆しない）
-    const viewOrder = ['character-view', 'chat-view', 'party-set-view', 'char-edit-view', 'quest-view', 'lore-view', 'settings-view'];
+    const viewOrder = ['character-view', 'chat-view', 'party-set-view', 'char-edit-view', 'quest-view', 'lore-view', 'image-library-view', 'settings-view'];
     document.addEventListener('keydown', function(e) {
         if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
         const idx = parseInt(e.key, 10) - 1;
@@ -2160,6 +2385,14 @@ function setupSettings() {
     const pureChatPromptEl = document.getElementById('pure-chat-system-prompt');
     if (pureChatPromptEl) pureChatPromptEl.value = pureChatSystemPrompt;
 
+    // ===== 画像ライブラリ設定の読み込み =====
+    const imgLibEnabledEl = document.getElementById('image-library-enabled');
+    const imgTagMaxEl     = document.getElementById('image-tag-inject-max');
+    const imgPerTurnEl    = document.getElementById('image-max-per-turn');
+    if (imgLibEnabledEl) imgLibEnabledEl.checked = imageLibraryEnabled;
+    if (imgTagMaxEl)     imgTagMaxEl.value       = imageTagInjectMax;
+    if (imgPerTurnEl)    imgPerTurnEl.value      = imageMaxPerTurn;
+
     // ===== 音声入力 (STT) 設定の読み込み =====
     const sttEnabledEl   = document.getElementById('stt-enabled');
     const sttEngineEl    = document.getElementById('stt-engine');
@@ -2347,6 +2580,20 @@ function setupSettings() {
         // ===== 純チャットモード設定の保存 =====
         if (pureChatPromptEl) pureChatSystemPrompt = pureChatPromptEl.value;
         localStorage.setItem('pureChatSystemPrompt', pureChatSystemPrompt);
+
+        // ===== 画像ライブラリ設定の保存 =====
+        if (imgLibEnabledEl) imageLibraryEnabled = !!imgLibEnabledEl.checked;
+        if (imgTagMaxEl) {
+            const v = parseInt(imgTagMaxEl.value);
+            imageTagInjectMax = (isNaN(v) || v < 5) ? 60 : (v > 200 ? 200 : v);
+        }
+        if (imgPerTurnEl) {
+            const v = parseInt(imgPerTurnEl.value);
+            imageMaxPerTurn = (isNaN(v) || v < 1) ? 2 : (v > 5 ? 5 : v);
+        }
+        localStorage.setItem('imageLibraryEnabled', imageLibraryEnabled ? '1' : '0');
+        localStorage.setItem('imageTagInjectMax', String(imageTagInjectMax));
+        localStorage.setItem('imageMaxPerTurn', String(imageMaxPerTurn));
 
         // ===== 音声入力 (STT) 設定の保存 =====
         const prevSttEnabled = sttEnabled;
@@ -3083,17 +3330,24 @@ function setupNarratorSettings() {
 }
 
 
-function appendImageMessage(base64, prompt) {
+/**
+ * 画像バブルを描画する。
+ * @param {string} base64 base64文字列。opts.isUrl=true のときは URL / DataURL をそのまま使う
+ * @param {string} prompt キャプション
+ * @param {{isUrl?:boolean}} opts isUrl=true で事前登録画像モード（SD再生成ボタンを出さない）
+ */
+function appendImageMessage(base64, prompt, opts) {
+    const isUrl = !!(opts && opts.isUrl);
     const chatContainer = document.getElementById('chat-history');
     const msgDiv = document.createElement('div');
-    msgDiv.className = 'chat-msg image-msg';
+    msgDiv.className = 'chat-msg image-msg' + (isUrl ? ' library-image' : '');
 
     const container = document.createElement('div');
     container.className = 'image-msg-container';
 
     const img = document.createElement('img');
-    img.src = 'data:image/png;base64,' + base64;
-    img.alt = 'Generated scene';
+    img.src = isUrl ? base64 : ('data:image/png;base64,' + base64);
+    img.alt = isUrl ? (prompt || 'Library image') : 'Generated scene';
     img.className = 'generated-image';
 
     const promptText = document.createElement('div');
@@ -3151,13 +3405,60 @@ function appendImageMessage(base64, prompt) {
 
     container.appendChild(img);
     container.appendChild(promptText);
-    container.appendChild(regenBtn);
-    container.appendChild(editPromptBtn);
+    // 事前登録画像は SD 再生成の対象外なので、生成系ボタンは付けない
+    if (!isUrl) {
+        container.appendChild(regenBtn);
+        container.appendChild(editPromptBtn);
+    }
     msgDiv.appendChild(container);
     chatContainer.appendChild(msgDiv);
     scrollToBottom();
 
     return msgDiv;
+}
+
+/**
+ * 事前登録画像をタグ指定でチャットに挿入する。
+ * 履歴には imageData ではなく imageTag（参照）を保存するため、
+ * saveChatHistory の imageData 剥奪を受けず、リロード後も画像が復元できる。
+ * @param {string} tag カタログのタグ
+ * @param {number} forcedIndex 復元時の既存インデックス（-1 なら新規追加）
+ */
+async function appendLibraryImage(tag, forcedIndex = -1) {
+    const entry = findByTag(imageCatalog, tag);
+    if (!entry) {
+        console.warn('[ImageLib] unknown tag:', tag);
+        return null;
+    }
+    if (!_imgDirHandle) {
+        console.warn('[ImageLib] no folder selected');
+        return null;
+    }
+    if (!_imgDirGranted) {
+        // 復元時など非対話文脈では要求できないので静かに諦める
+        _imgDirGranted = await verifyPermission(_imgDirHandle, false);
+        if (!_imgDirGranted) {
+            console.warn('[ImageLib] folder permission not granted');
+            return null;
+        }
+    }
+    const url = await getImageUrl(_imgDirHandle, entry.file, entry.subDir);
+    if (!url) return null;
+
+    let idx = forcedIndex;
+    if (forcedIndex < 0) {
+        chatHistory.push({
+            role: 'assistant',
+            content: '[Library Image]\nTag: ' + tag,
+            isImage: true,
+            imageTag: tag   // ← 復元キー。imageData は持たせない
+        });
+        saveChatHistory();
+        idx = chatHistory.length - 1;
+    }
+    const div = appendImageMessage(url, entry.description || tag, { isUrl: true });
+    div.setAttribute('data-index', idx);
+    return div;
 }
 
 function openPromptEditModal(currentPrompt, onGenerate) {
@@ -4438,7 +4739,10 @@ function restoreChatFromStorage() {
         // Restore visual messages — splitAndAppendCharMessages を使い SPEAKER タグを正しく解析
         document.getElementById('chat-history').innerHTML = '';
         chatHistory.forEach((msg, idx) => {
-            if (msg.isImage && msg.imageData) {
+            if (msg.isImage && msg.imageTag) {
+                // 事前登録画像: タグから再解決するのでリロード後も復元できる（非同期）
+                appendLibraryImage(msg.imageTag, idx);
+            } else if (msg.isImage && msg.imageData) {
                 // Restore generated image (full data available)
                 const imgMsgDiv = appendImageMessage(msg.imageData, msg.content.replace('[Generated Image]\nPrompt: ', ''));
                 imgMsgDiv.setAttribute('data-index', idx);
@@ -4566,6 +4870,8 @@ function saveChatHistory() {
         // alternatives / activeIndex を保存に含める（スワイプ機能用）
         const saved = { role: entry.role, content: entry.content };
         if (entry.isImage) saved.isImage = true;
+        // 事前登録画像はタグ参照なので軽量。保存してリロード後の復元に使う
+        if (entry.imageTag) saved.imageTag = entry.imageTag;
         if (entry.alternatives && entry.alternatives.length > 1) {
             saved.alternatives = entry.alternatives;
             saved.activeIndex = entry.activeIndex;
@@ -4886,7 +5192,10 @@ function renderChatFromHistory() {
     }
 
     chatHistory.forEach((msg, idx) => {
-        if (msg.isImage && msg.imageData) {
+        if (msg.isImage && msg.imageTag) {
+            // 事前登録画像: タグから再解決（非同期）
+            appendLibraryImage(msg.imageTag, idx);
+        } else if (msg.isImage && msg.imageData) {
             const imgDiv = appendImageMessage(msg.imageData, msg.content.replace('[Generated Image]\nPrompt: ', ''));
             imgDiv.setAttribute('data-index', idx);
         } else if (msg.isImage) {
@@ -5332,6 +5641,25 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
     // [MEMO: 〜] タグを最初に抽出（AI Memo へ追加 + 表示文からは除去）
     fullReply = parseAndStoreAiMemoTags(fullReply);
 
+    // {img:tag} を抽出（本文からは常に除去し、有効時のみ描画後に画像バブルを挿入）
+    let _extractedImgTags = [];
+    {
+        const imgResult = parseImageTags(fullReply);
+        if (imgResult.tags.length > 0) {
+            fullReply = imgResult.cleanedContent;
+            if (imageLibraryEnabled) {
+                _extractedImgTags = imgResult.tags.slice(0, Math.max(1, imageMaxPerTurn));
+            }
+        }
+    }
+    // 全メッセージ描画後に画像を順次挿入する（4つの return 経路から共通で呼ぶ）
+    const _flushLibraryImages = () => {
+        if (!_extractedImgTags.length) return;
+        const tags = _extractedImgTags;
+        _extractedImgTags = []; // 二重挿入防止
+        (async () => { for (const t of tags) await appendLibraryImage(t); })();
+    };
+
     // Universe Report 検出 → 「学習量: 低い」なら世界観名で自動 Web Search → AI Memo へ記録 (非同期)
     detectUniverseReportAndAutoSearch(fullReply);
 
@@ -5403,6 +5731,7 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
                 if (snap) { chatHistory[mIdx].statusSnapshot = snap; saveChatHistory(); }
                 updateStatusHUD();
             }
+            if (shouldSave) _flushLibraryImages();
             if (shouldSave && _extractedChoices && _extractedChoices.length > 0) {
                 renderChoiceButtons(_extractedChoices);
             }
@@ -5455,7 +5784,8 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             chatHistory[chatHistory.length - 1].infoSnapshot = _extractedInfoText;
             saveChatHistory();
         }
-        // 選択肢ボタン描画（1人構成・SPEAKER タグなし経路でも忘れずに）
+        // 事前登録画像 → 選択肢ボタンの順で描画（1人構成・SPEAKER タグなし経路）
+        if (shouldSave) _flushLibraryImages();
         if (shouldSave && _extractedChoices && _extractedChoices.length > 0) {
             renderChoiceButtons(_extractedChoices);
         }
@@ -5546,7 +5876,8 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             }
             updateStatusHUD();
         }
-        // 1人構成: 選択肢描画
+        // 事前登録画像 → 選択肢描画（名前プレフィックス・フォールバック経路）
+        if (!renderMode) _flushLibraryImages();
         if (!renderMode && _extractedChoices && _extractedChoices.length > 0) {
             renderChoiceButtons(_extractedChoices);
         }
@@ -5710,7 +6041,8 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
         updateStatusHUD();
     }
 
-    // 新規生成かつ抽出した選択肢があれば描画
+    // 新規生成: 事前登録画像 → 選択肢ボタンの順で描画（タグベース解析経路）
+    if (!renderMode) _flushLibraryImages();
     if (!renderMode && _extractedChoices && _extractedChoices.length > 0) {
         renderChoiceButtons(_extractedChoices);
     }
@@ -6899,6 +7231,30 @@ async function fetchChatCompletion(mode) {
         systemPrompt += '================================================\n';
     }
 
+    // ===== 🖼️ 事前登録画像タグ（Layer 2: LLM がタグで画像を呼ぶ） =====
+    // 全件を毎回渡すとコンテキストを食うため、登場中キャラのタグに絞り、件数上限も設ける。
+    if (imageLibraryEnabled && imageCatalog.length > 0) {
+        const activeNames = members.map(m => m.name);
+        const usable = imageCatalog.filter(e =>
+            e.tag && e.layer !== 'state' && (!e.character || activeNames.includes(e.character))
+        );
+        if (usable.length > 0) {
+            const listed = usable.slice(0, Math.max(1, imageTagInjectMax));
+            systemPrompt += '\n\n========== 画像タグ（使用可能な画像） ==========\n';
+            systemPrompt += '場面や表情に合う画像がある場合、応答本文中に {img:タグ名} と書くとその画像が表示されます。\n';
+            systemPrompt += '・1応答につき最大 ' + Math.max(1, imageMaxPerTurn) + ' 個まで。ふさわしい画像が無ければ使わなくてよい。\n';
+            systemPrompt += '・タグは下記リストから厳密に選ぶこと（リストにないタグは無視されます）。\n';
+            systemPrompt += '・タグは本文の流れの中に自然に置くこと（読者にはタグ自体は見えません）。\n\n';
+            listed.forEach(e => {
+                systemPrompt += '{img:' + e.tag + '}'
+                    + (e.description ? ' — ' + e.description : '')
+                    + (e.character ? '（' + e.character + '）' : '')
+                    + '\n';
+            });
+            systemPrompt += '================================================\n';
+        }
+    }
+
     // ===== NPC 発言保証（複数キャラ・非banter時のみ） =====
     // 全 NPC を毎ターン喋らせると重い。シーン中心の最大 N 人だけ最低一言を促す。
     if (npcMinDialogueEnabled && members.length >= 2 && mode !== 'banter' && mode !== 'banter_player') {
@@ -7917,6 +8273,16 @@ function advanceQuestEvent() {
         appendMessage('system', '📍 次のイベント: ' + nextEvent.title, 'System', false);
     } else {
         appendMessage('system', '🏁 全イベントが完了しました！', 'System', false);
+    }
+
+    // ===== 🖼️ Layer 1: イベントに紐付いた場面画像を表示 =====
+    // カタログ側が eventId を持つ片方向参照なので、クエスト JSON のスキーマ変更は不要。
+    if (imageLibraryEnabled && nextEvent) {
+        const evIdNorm = String(_normalizeId(nextEvent.id));
+        const hit = imageCatalog.find(e =>
+            e.layer === 'state' && e.eventId !== '' && String(_normalizeId(e.eventId)) === evIdNorm
+        );
+        if (hit) appendLibraryImage(hit.tag);
     }
 }
 

@@ -43,7 +43,11 @@
                 <span class="nav-icon">📖</span>
                 <div class="nav-labels"><span class="nav-label">World Lore</span><span class="nav-sublabel">世界設定</span></div>
             </div>
-            <div class="nav-item" data-view="settings-view" title="Alt+7">
+            <div class="nav-item" data-view="image-library-view" title="Alt+7">
+                <span class="nav-icon">🖼️</span>
+                <div class="nav-labels"><span class="nav-label">Image Library</span><span class="nav-sublabel">画像ライブラリ</span></div>
+            </div>
+            <div class="nav-item" data-view="settings-view" title="Alt+8">
                 <span class="nav-icon">⚙️</span>
                 <div class="nav-labels"><span class="nav-label">Settings</span><span class="nav-sublabel">設定</span></div>
             </div>
@@ -398,6 +402,54 @@
             </div>
         </div>
 
+        <!-- Image Library View -->
+        <div class="single-panel-view view-section hidden" id="image-library-view">
+            <div class="editor-panel">
+                <h2>🖼️ Image Library <span class="panel-subtitle">(事前登録画像)</span></h2>
+                <p class="hint">画像をあらかじめ登録しておき、AI が <code>{img:タグ名}</code> を出力したときにチャット内へ表示します。<br>
+                画像の実体は<strong>選択したフォルダのまま</strong>参照するため、ブラウザ容量を消費せず何百枚でも登録できます。<br>
+                ⚠️ Chrome / Edge のみ対応（File System Access API 使用）。</p>
+
+                <div class="imglib-toolbar">
+                    <button id="imglib-pick-folder-btn" class="primary-btn">📂 画像フォルダを選択</button>
+                    <button id="imglib-rescan-btn" class="secondary-btn">🔄 再スキャン</button>
+                    <button id="imglib-set-char-btn" class="secondary-btn" title="サブフォルダ名をキャラ名として一括設定">👥 サブフォルダ名をキャラ名に</button>
+                    <button id="imglib-check-dup-btn" class="secondary-btn" title="タグの重複を検出">🔍 タグ重複チェック</button>
+                    <button id="imglib-save-btn" class="primary-btn">💾 カタログを保存</button>
+                </div>
+
+                <div id="imglib-status" class="imglib-status">フォルダが未選択です。「📂 画像フォルダを選択」から選んでください。</div>
+
+                <div class="imglib-table-wrap">
+                    <table class="imglib-table">
+                        <thead>
+                            <tr>
+                                <th style="width:64px;">画像</th>
+                                <th style="width:160px;">タグ</th>
+                                <th>説明（AIが選ぶ手がかり）</th>
+                                <th style="width:130px;">キャラ</th>
+                                <th style="width:110px;">レイヤー</th>
+                                <th style="width:90px;">イベントID</th>
+                                <th style="width:48px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="imglib-tbody">
+                            <tr><td colspan="7" class="imglib-empty">まだ登録がありません。</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p class="hint" style="background: rgba(76,175,80,0.08); padding:0.75rem; border-radius:8px; border-left:3px solid #4caf50; margin-top:1rem;">
+                💡 使い方:<br>
+                ・タグはファイル名から自動生成されます（<code>mahiro_smile.png</code> → <code>mahiro_smile</code>）<br>
+                ・<strong>説明</strong>は AI が「どの場面でこの画像を使うか」を判断する手がかりです。書いておくほど精度が上がります<br>
+                ・<strong>キャラ</strong>を設定すると、そのキャラが登場中のときだけ AI にタグが渡されます（コンテキスト節約）<br>
+                ・レイヤー <code>reactive</code> = AIがタグで呼ぶ／<code>state</code> = クエストのイベント遷移時に自動表示（イベントIDを指定）<br>
+                ・サブフォルダで整理すると、フォルダ名がキャラ名の初期値になります
+                </p>
+            </div>
+        </div>
+
         <!-- Quest View -->
         <div class="quest-container view-section hidden" id="quest-view">
             <!-- Quest Library (default sub-view) -->
@@ -606,6 +658,32 @@
                 ・ストリーミング / 繰り返しペナルティ / タイムアウトは共通で有効<br>
                 ・Web Search / AI Memo / 選択肢 / Info Panel などのRP機能は自動的に無効<br>
                 ・履歴は直近 10 ターンのスライディングウィンドウで送信（要約はなし）
+                </p>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
+
+                <h2>🖼️ 画像ライブラリ (Pre-registered Images)</h2>
+                <p class="hint" style="margin-bottom: 1rem;">事前に登録した画像を、AI が <code>{img:タグ名}</code> を出力したときにチャット内へ表示します。<br>
+                画像の登録・タグ編集は左メニューの <strong>🖼️ Image Library</strong> から行います。</p>
+
+                <div class="form-group">
+                    <label><input type="checkbox" id="image-library-enabled"> 🖼️ <strong>画像ライブラリを有効にする</strong></label>
+                    <div class="hint">OFF のときはタグが出力されても本文から除去されるだけで、画像は表示されません</div>
+                </div>
+                <div class="form-group">
+                    <label>AI に渡すタグの上限件数</label>
+                    <input type="number" id="image-tag-inject-max" min="5" max="200" step="5" value="60" style="width:120px;">
+                    <div class="hint">system prompt に列挙するタグの最大数。多いほど選択肢が増えるがコンテキストを消費します（推奨 40〜80）<br>※ キャラを設定したタグは、そのキャラが登場中のときだけ渡されます</div>
+                </div>
+                <div class="form-group">
+                    <label>1応答あたりの最大表示枚数</label>
+                    <input type="number" id="image-max-per-turn" min="1" max="5" value="2" style="width:120px;">
+                    <div class="hint">AI が多数のタグを出しても、この枚数までしか表示しません</div>
+                </div>
+                <p class="hint" style="background: rgba(76,175,80,0.08); padding:0.75rem; border-radius:8px; border-left:3px solid #4caf50;">
+                💡 画像はフォルダを参照するだけなので、<strong>何百枚登録してもブラウザ容量をほとんど消費しません</strong>。<br>
+                また SD 生成画像と違い、<strong>リロードしても画像が消えません</strong>（タグから再解決するため）。<br>
+                ⚠️ Chrome / Edge のみ対応。https または localhost で開く必要があります（音声入力と同じ制約）
                 </p>
 
                 <hr style="border-color: rgba(255,255,255,0.1); margin: 2rem 0;">
