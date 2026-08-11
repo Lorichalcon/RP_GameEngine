@@ -1535,6 +1535,7 @@ function extractDialogue(text, isNarration) {
         cleaned = cleaned.replace(/\[STATUS:[^\]]+\]/gi, '');
         cleaned = cleaned.replace(/\[INFO\][\s\S]*?\[\/INFO\]/gi, '');
         cleaned = cleaned.replace(/\[CHOICES\][\s\S]*?\[\/CHOICES\]/gi, '');
+        cleaned = cleaned.replace(/\{img:[^}]*\}/gi, ''); // 画像タグは読み上げない
         // マークダウン強調記号と動作記号を除去
         cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, '$1');
         cleaned = cleaned.replace(/\*(.*?)\*/g, '$1');
@@ -3506,6 +3507,60 @@ function appendImageMessage(base64, prompt, opts) {
 }
 
 /**
+ * 本文を {img:タグ} の位置で分割し、その場所に画像を挟んで container に描画する。
+ * 画像要素は同期的に正しい位置へ作り、src だけを後から非同期で埋める。
+ * こうすることで「待っている間に末尾へ付く」「再描画と競合して重複する」が原理的に起きない。
+ */
+function buildTextWithInlineImages(container, text) {
+    const re = /\{img:\s*([a-zA-Z0-9_\-ぁ-んァ-ヶ一-龠]+)\s*\}/g;
+    let last = 0;
+    let m;
+    const addText = (s) => {
+        if (!s) return;
+        const span = document.createElement('span');
+        span.className = 'msg-text-part';
+        span.innerHTML = escapeHTML(s);
+        container.appendChild(span);
+    };
+    while ((m = re.exec(text)) !== null) {
+        addText(text.slice(last, m.index));
+        const im = document.createElement('img');
+        im.className = 'library-inline-image';
+        im.setAttribute('data-img-tag', m[1]);
+        im.alt = m[1];
+        container.appendChild(im);
+        resolveLibraryImageSrc(im, m[1]); // 非同期で src を埋める
+        last = m.index + m[0].length;
+    }
+    addText(text.slice(last));
+}
+
+/** インライン画像要素の src を、カタログとフォルダから解決して埋める */
+async function resolveLibraryImageSrc(imgEl, tag) {
+    const drop = () => { if (imgEl && imgEl.parentNode) imgEl.remove(); };
+    const entry = findByTag(imageCatalog, tag);
+    if (!entry) {
+        console.warn('[ImageLib] unknown tag:', tag,
+            '| 登録済みタグ:', imageCatalog.map(e => e.tag).join(', ') || '(なし)');
+        drop();
+        return;
+    }
+    if (!_imgDirHandle) { drop(); return; }
+    if (!_imgDirGranted) {
+        _imgDirGranted = await verifyPermission(_imgDirHandle, false);
+        if (!_imgDirGranted) {
+            drop();
+            showImagePermissionBanner();
+            return;
+        }
+    }
+    const url = await getImageUrl(_imgDirHandle, entry.file, entry.subDir);
+    if (!url) { drop(); return; }
+    imgEl.src = url;
+    imgEl.alt = entry.description || tag;
+}
+
+/**
  * 事前登録画像をタグ指定でチャットに挿入する。
  * 履歴には imageData ではなく imageTag（参照）を保存するため、
  * saveChatHistory の imageData 剥奪を受けず、リロード後も画像が復元できる。
@@ -5226,7 +5281,12 @@ function appendMessage(role, text, name, shouldSave = true, forcedIndex = -1, st
     
     var textNode = document.createElement('div');
     textNode.className = 'msg-text';
-    textNode.innerHTML = escapeHTML(text);
+    if (imageLibraryEnabled && /\{img:/i.test(text)) {
+        // {img:タグ} の位置で本文を分割し、その場所に画像を挟み込む
+        buildTextWithInlineImages(textNode, text);
+    } else {
+        textNode.innerHTML = escapeHTML(text);
+    }
     contentDiv.appendChild(textNode);
 
     // スワイプUI（alternatives が 2件以上ある assistant メッセージに表示）
@@ -5837,40 +5897,21 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
     fullReply = parseAndStoreAiMemoTags(fullReply);
 
     // {img:tag} を抽出（本文からは常に除去し、有効時のみ描画後に画像バブルを挿入）
-    // {img:tag} は「本文に残したまま、表示のときだけ隠す」方式。
-    // 履歴には原文（タグ付き）を保存するので、編集画面でタグの位置が見え、移動もできる。
-    let _extractedImgTags = [];
+    // {img:tag} は本文に残したまま描画側へ渡す。
+    // appendMessage がタグの位置で本文を分割し、そこに画像を挟み込む
+    // （タグの位置＝画像の表示位置になる）。
     const _replyWithImgTags = fullReply; // 履歴保存用（タグを残した原文）
-    {
+    if (!imageLibraryEnabled) {
+        // 機能 OFF のときはタグが本文にそのまま出てしまうので表示からは除去する
         const imgResult = parseImageTags(fullReply);
         if (imgResult.tags.length > 0) {
-            fullReply = imgResult.cleanedContent; // 表示用（タグを除去）
-            if (imageLibraryEnabled) {
-                _extractedImgTags = imgResult.tags.slice(0, Math.max(1, imageMaxPerTurn));
-            } else if (shouldSave) {
-                // タグは表示から消えるのに画像が出ない＝機能OFFのまま、という状況は
-                // 見分けが付かないため明示的に知らせる
+            fullReply = imgResult.cleanedContent;
+            if (shouldSave) {
                 console.warn('[ImageLib] タグを検出しましたが画像ライブラリが無効です:', imgResult.tags.join(', '));
                 showToast('🖼️ 画像タグを検出しましたが機能が OFF です — Settings → 画像ライブラリ を有効にしてください', 'error');
             }
         }
     }
-    /**
-     * 本文中のタグに対応する画像を、メッセージ描画後に挿入する。
-     * 新規生成でも再描画でも動く（画像は履歴エントリを増やさず、タグから毎回解決する）。
-     * @param {number} ownerIdx 画像を紐付けるメッセージの履歴インデックス
-     */
-    const _flushLibraryImages = (ownerIdx) => {
-        if (!_extractedImgTags.length) return;
-        const tags = _extractedImgTags;
-        _extractedImgTags = []; // 二重挿入防止
-        const idx = (typeof ownerIdx === 'number' && ownerIdx >= 0) ? ownerIdx : 0;
-        // forcedIndex を渡すので履歴には push されない（タグが唯一の情報源）
-        (async () => {
-            for (const t of tags) await appendLibraryImage(t, idx, { quiet: !shouldSave });
-            if (shouldSave) scrollToBottom(); // 新規生成時のみ最新位置へ
-        })();
-    };
 
     // Universe Report 検出 → 「学習量: 低い」なら世界観名で自動 Web Search → AI Memo へ記録 (非同期)
     detectUniverseReportAndAutoSearch(fullReply);
@@ -5944,7 +5985,6 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
                 if (snap) { chatHistory[mIdx].statusSnapshot = snap; saveChatHistory(); }
                 updateStatusHUD();
             }
-            _flushLibraryImages(mIdx); // 再描画時も本文タグから画像を復元する
             if (shouldSave && _extractedChoices && _extractedChoices.length > 0) {
                 renderChoiceButtons(_extractedChoices);
             }
@@ -5974,16 +6014,12 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             ? (existingSnapshot && existingSnapshot[name]) || null
             : getStatusValueForSpeaker(name);
         appendMessage('char', applyMacros(cleanedContent, name), name, shouldSave, forcedIndex, statusForSpeaker);
-        // 選択肢ブロック / 画像タグを履歴に残す
-        // （この経路は appendMessage が表示用テキストを push するため、末尾エントリへ追記して復元する）
-        if (shouldSave && chatHistory.length > 0) {
-            const imgSuffix = _extractedImgTags.length
-                ? '\n' + _extractedImgTags.map(t => '{img:' + t + '}').join('')
-                : '';
-            if (_choicesRawBlock || imgSuffix) {
-                chatHistory[chatHistory.length - 1].content += imgSuffix + _choicesRawBlock;
-                saveChatHistory();
-            }
+        // 選択肢ブロックを履歴に残す
+        // （この経路は appendMessage が表示用テキストを push するため、末尾エントリへ追記して復元する。
+        //   {img:} タグは表示テキストに含まれたまま push されるので、ここでの追記は不要）
+        if (shouldSave && _choicesRawBlock && chatHistory.length > 0) {
+            chatHistory[chatHistory.length - 1].content += _choicesRawBlock;
+            saveChatHistory();
         }
         if (shouldSave && autoplayTts) {
             const resolved = resolveTtsVoice(name, members[0]);
@@ -6004,7 +6040,6 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             saveChatHistory();
         }
         // 事前登録画像 → 選択肢ボタンの順で描画（1人構成・SPEAKER タグなし経路）
-        _flushLibraryImages(shouldSave ? (chatHistory.length - 1) : forcedIndex);
         if (shouldSave && _extractedChoices && _extractedChoices.length > 0) {
             renderChoiceButtons(_extractedChoices);
         }
@@ -6097,7 +6132,6 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
             updateStatusHUD();
         }
         // 事前登録画像 → 選択肢描画（名前プレフィックス・フォールバック経路）
-        _flushLibraryImages(mIndex);
         if (!renderMode && _extractedChoices && _extractedChoices.length > 0) {
             renderChoiceButtons(_extractedChoices);
         }
@@ -6263,7 +6297,6 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
     }
 
     // 事前登録画像 → 選択肢ボタンの順で描画（タグベース解析経路）
-    _flushLibraryImages(msgIndex);
     if (!renderMode && _extractedChoices && _extractedChoices.length > 0) {
         renderChoiceButtons(_extractedChoices);
     }

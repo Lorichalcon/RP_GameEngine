@@ -3624,18 +3624,22 @@ main {
 }
 #imglib-permission-btn:hover { background: #ffb851; }
 
-/* 事前登録画像: メッセージ吹き出しの中に埋め込む表示 */
+/* 事前登録画像: 本文中のタグ位置に挟み込む表示 */
 .library-inline-image {
   display: block;
   max-width: 100%;
   max-height: 420px;
   width: auto;
   height: auto;
-  margin-top: 0.6rem;
+  margin: 0.7rem 0;
   border-radius: 10px;
   border: 1px solid var(--glass-border);
   object-fit: contain;
-  cursor: zoom-in;
+}
+/* 分割されたテキスト片。親の pre-wrap を引き継いで改行・空白を保つ */
+.msg-text-part {
+  display: block;
+  white-space: pre-wrap;
 }
 @media (max-width: 768px) {
   .library-inline-image { max-height: 300px; }
