@@ -4828,6 +4828,42 @@ function getPartyId() {
 }
 
 /**
+ * 旧方式（画像を独立した履歴エントリとして持つ）の残骸を掃除する。
+ *
+ * 現在は {img:タグ} を本文に残し、そこから画像を解決する方式に統一している。
+ * 方式変更前に作られた独立エントリが残っていると、本文タグ由来の画像と
+ * 二重に表示されるため、本文に同じタグがあるものだけを削除する。
+ * （本文にタグが無い独立エントリ＝クエストイベント画像などは、
+ *   重複していないのでそのまま残す）
+ * @returns {number} 削除した件数
+ */
+function migrateLegacyImageEntries() {
+    if (!Array.isArray(chatHistory) || chatHistory.length === 0) return 0;
+    let removed = 0;
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+        const e = chatHistory[i];
+        if (!e || !e.isImage || !e.imageTag) continue;
+
+        // 直前の非画像メッセージを探す
+        let p = i - 1;
+        while (p >= 0 && chatHistory[p] && chatHistory[p].isImage) p--;
+        if (p < 0) continue;
+
+        const prevContent = (chatHistory[p] && chatHistory[p].content) || '';
+        // 本文に同じタグがある＝新方式で既に表示されるので、この独立エントリは重複
+        if (prevContent.includes('{img:' + e.imageTag + '}')) {
+            chatHistory.splice(i, 1);
+            removed++;
+        }
+    }
+    if (removed > 0) {
+        saveChatHistory();
+        console.log('[ImageLib] 旧形式の重複画像エントリを ' + removed + ' 件削除しました');
+    }
+    return removed;
+}
+
+/**
  * 現在の partyId バケットから chatHistory をロードして画面を再構築する。
  * init() 起動時と、純チャットモード切替（バケット切替）時に使用。
  */
@@ -4835,6 +4871,9 @@ function restoreChatFromStorage() {
     const savedChat = localStorage.getItem('chatHistory_' + getPartyId());
     if (savedChat) {
         chatHistory = JSON.parse(savedChat);
+
+        // 旧方式の独立画像エントリ（本文タグと重複するもの）を掃除してから描画する
+        migrateLegacyImageEntries();
 
         // status_values を履歴中の最新 statusSnapshot に同期（リロード後も値を維持）
         if (activeQuest && _hasAnyStatusParams(activeQuest)) {
@@ -5240,6 +5279,8 @@ function editMessage(msgDiv, index) {
         }
 
         chatHistory[index].content = newText;
+        // 本文にタグを書いた結果、旧方式の独立エントリと重複する場合はそちらを消す
+        migrateLegacyImageEntries();
         saveChatHistory();
         // Full re-render is safest for visual consistency
         renderChatFromHistory();
