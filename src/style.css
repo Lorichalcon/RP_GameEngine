@@ -3598,3 +3598,28 @@ main {
   .imglib-table { font-size: 0.78rem; }
   .imglib-thumb { width: 40px; height: 40px; }
 }
+
+/* 画像フォルダ権限の復帰バナー（チャット内） */
+.imglib-permission-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0;
+  padding: 0.7rem 1rem;
+  border-radius: 10px;
+  background: rgba(255, 167, 38, 0.1);
+  border-left: 3px solid #ffa726;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+}
+#imglib-permission-btn {
+  background: #ffa726;
+  color: #1a1a1a;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#imglib-permission-btn:hover { background: #ffb851; }

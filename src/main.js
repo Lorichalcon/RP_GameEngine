@@ -180,6 +180,33 @@ async function ensureImageDirPermission() {
     return _imgDirGranted;
 }
 
+/**
+ * 画像フォルダの許可が切れている場合に、チャット画面から復帰するためのバナーを出す。
+ * 権限要求はユーザーのクリック起点でしか通らないため、ボタンを踏ませる必要がある。
+ */
+function showImagePermissionBanner() {
+    if (document.getElementById('imglib-permission-banner')) return;
+    const history = document.getElementById('chat-history');
+    if (!history) return;
+    const bar = document.createElement('div');
+    bar.id = 'imglib-permission-banner';
+    bar.className = 'imglib-permission-banner';
+    bar.innerHTML = '🖼️ 画像フォルダへのアクセス許可が必要です '
+        + '<button id="imglib-permission-btn">許可する</button>';
+    history.appendChild(bar);
+    history.scrollTop = history.scrollHeight;
+    bar.querySelector('#imglib-permission-btn').addEventListener('click', async () => {
+        const ok = await ensureImageDirPermission();
+        if (ok) {
+            bar.remove();
+            showToast('🖼️ 画像フォルダを読み込めるようになりました');
+            renderChatFromHistory(); // 表示できなかった画像を再解決
+        } else {
+            showToast('許可が得られませんでした', 'error');
+        }
+    });
+}
+
 function renderImageLibraryTable() {
     const tbody = document.getElementById('imglib-tbody');
     if (!tbody) return;
@@ -3424,26 +3451,36 @@ function appendImageMessage(base64, prompt, opts) {
  * @param {string} tag カタログのタグ
  * @param {number} forcedIndex 復元時の既存インデックス（-1 なら新規追加）
  */
-async function appendLibraryImage(tag, forcedIndex = -1) {
+async function appendLibraryImage(tag, forcedIndex = -1, opts) {
+    const quiet = !!(opts && opts.quiet); // 履歴復元時は通知を抑制（大量に出るため）
     const entry = findByTag(imageCatalog, tag);
     if (!entry) {
-        console.warn('[ImageLib] unknown tag:', tag);
+        console.warn('[ImageLib] unknown tag:', tag,
+            '| 登録済みタグ:', imageCatalog.map(e => e.tag).join(', ') || '(なし)');
+        if (!quiet) showToast('🖼️ 未登録のタグ「' + tag + '」— Image Library で登録を確認してください', 'error');
         return null;
     }
     if (!_imgDirHandle) {
         console.warn('[ImageLib] no folder selected');
+        if (!quiet) showToast('🖼️ 画像フォルダが未選択です — Image Library で選択してください', 'error');
         return null;
     }
     if (!_imgDirGranted) {
-        // 復元時など非対話文脈では要求できないので静かに諦める
+        // 権限要求はユーザー操作起点でしか通らないため、ここでは非対話で確認のみ
         _imgDirGranted = await verifyPermission(_imgDirHandle, false);
         if (!_imgDirGranted) {
             console.warn('[ImageLib] folder permission not granted');
+            // 権限は要ユーザー操作。チャット内に復帰ボタンを出す（復元時も一度だけ出す）
+            showImagePermissionBanner();
             return null;
         }
     }
     const url = await getImageUrl(_imgDirHandle, entry.file, entry.subDir);
-    if (!url) return null;
+    if (!url) {
+        if (!quiet) showToast('🖼️ 画像を読めません: ' + (entry.subDir ? entry.subDir + '/' : '') + entry.file
+            + '（ファイル名が変わっていませんか）', 'error');
+        return null;
+    }
 
     let idx = forcedIndex;
     if (forcedIndex < 0) {
@@ -4741,7 +4778,7 @@ function restoreChatFromStorage() {
         chatHistory.forEach((msg, idx) => {
             if (msg.isImage && msg.imageTag) {
                 // 事前登録画像: タグから再解決するのでリロード後も復元できる（非同期）
-                appendLibraryImage(msg.imageTag, idx);
+                appendLibraryImage(msg.imageTag, idx, { quiet: true });
             } else if (msg.isImage && msg.imageData) {
                 // Restore generated image (full data available)
                 const imgMsgDiv = appendImageMessage(msg.imageData, msg.content.replace('[Generated Image]\nPrompt: ', ''));
@@ -5104,12 +5141,48 @@ function editMessage(msgDiv, index) {
     textNode.appendChild(saveBtn);
     textNode.appendChild(cancelBtn);
     
-    saveBtn.onclick = () => {
-        const newText = textarea.value;
+    saveBtn.onclick = async () => {
+        let newText = textarea.value;
+
+        // 手動で {img:タグ} を書き足した場合、その場で画像を挿入する。
+        // （通常生成時のタグ解析は splitAndAppendCharMessages 側で行われるため、
+        //   編集経由ではここで拾わないと画像が出ない）
+        let insertedTags = [];
+        if (imageLibraryEnabled) {
+            const imgResult = parseImageTags(newText);
+            if (imgResult.tags.length > 0) {
+                newText = imgResult.cleanedContent;              // 本文からタグを除去
+                insertedTags = imgResult.tags.slice(0, Math.max(1, imageMaxPerTurn));
+            }
+        }
+
         chatHistory[index].content = newText;
+
+        // 検出したタグを、編集したメッセージの直後に画像エントリとして差し込む
+        if (insertedTags.length > 0) {
+            const newEntries = insertedTags
+                .filter(t => {
+                    if (findByTag(imageCatalog, t)) return true;
+                    showToast('🖼️ 未登録のタグ「' + t + '」', 'error');
+                    return false;
+                })
+                .map(t => ({
+                    role: 'assistant',
+                    content: '[Library Image]\nTag: ' + t,
+                    isImage: true,
+                    imageTag: t
+                }));
+            if (newEntries.length > 0) chatHistory.splice(index + 1, 0, ...newEntries);
+        }
+
         saveChatHistory();
         // Full re-render is safest for visual consistency
         renderChatFromHistory();
+
+        // 権限が無いと復元経路は静かに失敗するため、復帰ボタンを出す
+        if (insertedTags.length > 0 && _imgDirHandle && !_imgDirGranted) {
+            showImagePermissionBanner();
+        }
     };
     
     cancelBtn.onclick = () => {
@@ -5194,7 +5267,7 @@ function renderChatFromHistory() {
     chatHistory.forEach((msg, idx) => {
         if (msg.isImage && msg.imageTag) {
             // 事前登録画像: タグから再解決（非同期）
-            appendLibraryImage(msg.imageTag, idx);
+            appendLibraryImage(msg.imageTag, idx, { quiet: true });
         } else if (msg.isImage && msg.imageData) {
             const imgDiv = appendImageMessage(msg.imageData, msg.content.replace('[Generated Image]\nPrompt: ', ''));
             imgDiv.setAttribute('data-index', idx);
