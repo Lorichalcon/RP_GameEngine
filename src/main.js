@@ -2,7 +2,7 @@ import './style.css'
 import { parseChoicesTag, parseInfoTag, collapseRunawayRepetition, looksRunawayRepetition, parseImageTags } from './parsers.js'
 import {
     isImageLibrarySupported, saveDirHandle, loadDirHandle, clearDirHandle, verifyPermission,
-    pickImageFolder, scanImageFiles, getImageUrl, revokeAllImageUrls,
+    pickImageFolder, scanImageFiles, getImageUrl, getImageDataUrl, revokeAllImageUrls,
     loadCatalog, serializeCatalog, getCatalogKey, findByTag,
     mergeScanIntoCatalog, findDuplicateTags
 } from './imageLibrary.js'
@@ -6686,7 +6686,13 @@ function setupChat() {
 
     const exportChatBtn = document.getElementById('export-chat-btn');
     if (exportChatBtn) {
-        exportChatBtn.addEventListener('click', exportChatLog);
+        // 画像の base64 埋め込みで非同期になるため、失敗を握り潰さないよう明示的に捕捉する
+        exportChatBtn.addEventListener('click', () => {
+            exportChatLog().catch(e => {
+                console.error('[Export] failed:', e);
+                showToast('エクスポートに失敗しました: ' + e.message, 'error');
+            });
+        });
     }
 
     const saveSessionBtn = document.getElementById('save-session-btn');
@@ -9692,7 +9698,7 @@ function loadChatSession(file) {
 /**
  * チャットログをスタンドアロン HTML ファイルとしてダウンロードする。
  */
-function exportChatLog() {
+async function exportChatLog() {
     if (chatHistory.length === 0) {
         alert('エクスポートするチャット履歴がありません。');
         return;
@@ -9700,6 +9706,40 @@ function exportChatLog() {
 
     const segments = parseChatHistoryToSegments();
     const members = getActivePartyMembers();
+
+    // ===== 事前登録画像を base64 で埋め込む =====
+    // HTML ログは配布先でフォルダを参照できないため、本文中の {img:タグ} を
+    // 実ファイルの data URL に置き換えて自己完結させる。
+    const imgTagRe = /\{img:\s*([a-zA-Z0-9_\-ぁ-んァ-ヶ一-龠]+)\s*\}/g;
+    const imgDataUrls = new Map(); // tag → dataURL
+    if (imageLibraryEnabled && _imgDirHandle) {
+        const wanted = new Set();
+        segments.forEach(seg => {
+            if (seg.role === 'image' || !seg.content) return;
+            let m;
+            imgTagRe.lastIndex = 0;
+            while ((m = imgTagRe.exec(seg.content)) !== null) wanted.add(m[1]);
+        });
+        if (wanted.size > 0) {
+            if (!_imgDirGranted) _imgDirGranted = await ensureImageDirPermission();
+            if (_imgDirGranted) {
+                showToast('🖼️ 画像 ' + wanted.size + ' 件を HTML に埋め込んでいます…');
+                for (const tag of wanted) {
+                    const entry = findByTag(imageCatalog, tag);
+                    if (!entry) continue;
+                    const dataUrl = await getImageDataUrl(_imgDirHandle, entry.file, entry.subDir);
+                    if (dataUrl) imgDataUrls.set(tag, dataUrl);
+                }
+            } else {
+                showToast('🖼️ フォルダの許可が無いため画像は埋め込まれません', 'error');
+            }
+        }
+    }
+    /** エスケープ済み本文の {img:タグ} を <img> に置換（未解決のタグは削除） */
+    const embedImageTags = (escaped) => escaped.replace(imgTagRe, (full, tag) => {
+        const url = imgDataUrls.get(tag);
+        return url ? `<img src="${url}" alt="${tag}" class="export-library-image">` : '';
+    });
 
     // ファイル名用のタイトル
     const questName = (activeQuest && activeQuest.template && activeQuest.template.metadata && activeQuest.template.metadata.name)
@@ -9725,11 +9765,13 @@ function exportChatLog() {
         }
         const isUser = seg.role === 'user';
         const isNarrator = seg.isNarrator;
-        const escapedContent = seg.content
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/\n/g, '<br>');
+        const escapedContent = embedImageTags(
+            seg.content
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>')
+        );
         const escapedName = seg.speakerName
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -9915,6 +9957,12 @@ function exportChatLog() {
     .export-prompt-text {
       font-size: 0.72em; color: rgba(255,255,255,0.3);
       margin-top: 5px; word-break: break-word;
+    }
+    .export-library-image {
+      display: block; max-width: 100%; max-height: 420px;
+      width: auto; height: auto; margin: 10px 0;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.1);
+      object-fit: contain;
     }
   </style>
 </head>

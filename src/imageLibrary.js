@@ -163,6 +163,30 @@ export async function getImageUrl(handle, fileName, subDir) {
     }
 }
 
+/**
+ * ファイルを data URL（base64）として読み出す。
+ * HTML ログのエクスポートなど、フォルダを参照できない環境へ画像を埋め込む用途に使う。
+ * Blob URL と違いファイル本体を内包するため、単体で表示できる代わりにサイズが大きくなる。
+ */
+export async function getImageDataUrl(handle, fileName, subDir) {
+    if (!handle || !fileName) return null;
+    try {
+        let dir = handle;
+        if (subDir) dir = await handle.getDirectoryHandle(subDir);
+        const fileHandle = await dir.getFileHandle(fileName);
+        const file = await fileHandle.getFile();
+        return await new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload  = () => resolve(fr.result);
+            fr.onerror = () => reject(fr.error);
+            fr.readAsDataURL(file);
+        });
+    } catch (e) {
+        console.warn('[ImageLib] getImageDataUrl failed:', fileName, e.message);
+        return null;
+    }
+}
+
 /** キャッシュ済み Blob URL を全て解放（フォルダ切替時など） */
 export function revokeAllImageUrls() {
     _urlCache.forEach(url => { try { URL.revokeObjectURL(url); } catch (e) {} });
