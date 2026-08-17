@@ -977,7 +977,6 @@ function formatAiMemoForPrompt() {
  */
 function shouldPerformWebSearch(userMessage) {
     if (!webSearchEnabled) { console.log('[WebSearch] disabled'); return null; }
-    if (pureChatMode) return null; // 純チャットは注入経路がないため検索しない
     if (!userMessage) return null;
     // 1. 明示トリガー [search:〜]（RP本文中に埋め込まれていても発動・クールダウン無視）
     const m = userMessage.match(/\[search:\s*([^\]\n]+)\]/i);
@@ -7080,9 +7079,15 @@ async function fetchChatCompletion(mode) {
     // Player Info / SPEAKER / クエスト / Lore / ペルソナ / directive 群をすべてバイパス。
     if (pureChatMode) {
         const msgs = [];
-        if (pureChatSystemPrompt && pureChatSystemPrompt.trim()) {
-            msgs.push({ role: 'system', content: pureChatSystemPrompt.trim() });
+        let sys = (pureChatSystemPrompt && pureChatSystemPrompt.trim()) ? pureChatSystemPrompt.trim() : '';
+        // Web Search の結果はここでも注入する。
+        // 「質問して最新情報を得る」のは純チャットで最も自然な使い方であり、
+        // RP 用の directive 群とは独立して機能させる。
+        if (_pendingWebSearchInjection) {
+            sys += (sys ? '\n' : '') + _pendingWebSearchInjection;
+            _pendingWebSearchInjection = ''; // 一度きり
         }
+        if (sys) msgs.push({ role: 'system', content: sys });
         // スライディングウィンドウのみ適用（Summaryception はRP用のため使わない）
         const hist = chatHistory.length > CONTEXT_WINDOW_ENTRIES
             ? chatHistory.slice(-CONTEXT_WINDOW_ENTRIES)
