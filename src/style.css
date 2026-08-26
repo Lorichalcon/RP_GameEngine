@@ -3644,3 +3644,27 @@ main {
 @media (max-width: 768px) {
   .library-inline-image { max-height: 300px; }
 }
+
+/* ======== 🎭 トーンプリセット セレクト（チャットツールバー内） ======== */
+#tone-select {
+  height: 36px;
+  align-self: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  padding: 0 8px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  max-width: 130px;
+  transition: all 0.2s;
+}
+#tone-select:hover { background: rgba(255, 255, 255, 0.12); }
+#tone-select.active {
+  background: rgba(186, 104, 200, 0.22);
+  border-color: rgba(186, 104, 200, 0.6);
+  color: #e0b0ff;
+  font-weight: 600;
+}
+#tone-select option { background: #1e2030; color: var(--text-primary); }

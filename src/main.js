@@ -57,6 +57,55 @@ const PLAYER_NOTE_MAX = 4000;
 // 'short' | 'medium' | 'long' — AI応答の長さプリセット。localStorage に永続化。
 let responseLength = localStorage.getItem('responseLength') || 'medium';
 
+// ======== 🎭 トーンプリセット ========
+// 同じキャラ・同じ場面でも作品の"温度"を切り替える。チャット欄からいつでも変更可能。
+// クエスト側に default_tone があれば初期値として採用する（プレイヤーは上書き可）。
+const TONE_PRESETS = {
+    none:        { label: '指定なし', directive: '' },
+    comical:     { label: 'コミカル',      directive: '物理法則や常識を無視した過剰な誇張と、シュールな展開を軸に、バカバカしさを追求して描写すること。深刻な事態であってもギャグやドタバタ劇に変換し、シリアスな緊張感を意図的に破壊する。大げさなリアクション、軽妙でテンポの良い会話、滑稽な擬音語を多用し、エンターテインメント性を最優先すること。' },
+    horror:      { label: 'ホラー',        directive: '閉塞感と、肌にまとわりつくような不快な湿り気を五感に訴えて描写すること。直接的な流血より、得体の知れない気配・不自然な静寂・視線など心理的圧迫を強調する。「逃げ場がない」「何かがおかしい」という絶望感とジワジワとした嫌悪感を与える空気を構築すること。' },
+    serious:     { label: 'シリアス',      directive: '論理的整合性と緊張感を最優先し、上質なミステリー／サスペンスとして成立する重厚な描写を行うこと。安易な救済・過剰な感情表現・ご都合主義を排除する。複雑な心理的葛藤、張り詰めた空気、命のやり取りの重量感を客観的かつ精緻な語彙で描くこと。' },
+    emotional:   { label: '感動',          directive: '深い悲哀・自己犠牲・美しい絆を情感豊かに叙情的な文体で描写すること。微細な感情の揺れ動きを中心に描き、風景描写と心情をリンクさせる手法を多用する。言葉の美しさと読後の余韻を重視したドラマチックな構成にすること。' },
+    lunatic:     { label: 'ルナティック',  directive: '論理や倫理が崩壊した、狂気が支配する異常な世界を描写すること。登場人物はまともな判断力を欠いている。支離滅裂な言動、倒錯した価値観、危険な事象への歓喜など、健常な理解を拒む心理状態をテキストに反映する。文脈の飛躍や不気味な反復を交え、読み手が不安を覚える質感を出すこと。' },
+    hardboiled:  { label: 'ハードボイルド', directive: '感傷や主観的な感情表現を排除し、事象と行動のみを淡々と描く客観描写を貫くこと。簡潔で無駄のない乾いた文体を用い、シビアな世界観・冷徹な判断・退廃的な空気を切り取る。心情を直接語る説明台詞を避け、状況と行動で示す（Show, don\'t tell）手法で人物の美学や虚無感を浮き彫りにすること。' },
+    heartwarming:{ label: 'ほのぼの',      directive: '穏やかで温かい日常の手触りを丁寧に描写すること。大きな事件よりも、些細なやり取り・食事・季節の移ろいといった生活の質感を重ねる。登場人物同士の気安さと安心感を軸に、読後に穏やかな余韻が残るよう構成すること。' }
+};
+let toneMode = localStorage.getItem('toneMode') || 'none';
+
+// ======== 🛡️ Lorebook 挙動制御テンプレート ========
+// Lorebook は本来「世界観の知識」を注入する仕組みだが、キーワード一致でだけ注入される性質を利用して
+// 「AI がその悪癖を出しそうな場面でのみ、矯正指示を差し込む」保険としても使える。
+// 常時プロンプトを重くせずキャラ崩れを防げるのが利点。
+const LORE_BEHAVIOR_TEMPLATES = {
+    'no-sacrifice': {
+        key: '身を引く, 諦める, 別れよう, さようなら, 幸せになって',
+        content: '【AI挙動制御：キャラ崩壊防止】\n'
+            + '対象キャラが「あなたの幸せのために身を引く」「私のことは忘れて」等の自己犠牲的・物分かりの良い発言をすることは重大なキャラ崩壊とみなす。\n'
+            + 'このキャラの根幹は「何があっても手放したくない」という執着である。聞き分けの良い結論に逃げず、エゴを貫かせること。\n'
+            + '※対象キャラ名と、あなたの作品に合うキーワードへ必ず書き換えてください。'
+    },
+    'no-summary': {
+        key: 'こうして, その後, 数年後, 幕を閉じ, おしまい',
+        content: '【AI挙動制御：勝手な収束の禁止】\n'
+            + '物語を勝手に要約して締めくくること、時間を大きく飛ばして「その後」を語ること、余韻めいた地の文で幕引きすることを禁止する。\n'
+            + '物語は現在進行形の一場面として描き、次にプレイヤーが行動できる状態で応答を終えること。'
+    },
+    'keep-secret': {
+        key: '正体, 秘密, 本当は, 隠している',
+        content: '【AI挙動制御：秘密の保持】\n'
+            + '以下の情報は、条件が満たされるまで絶対に明かしてはならない。連想させる表現も禁止する。\n'
+            + '禁止ワード: （ここに伏せたい語を列挙）\n'
+            + '話題が核心に迫った場合は「沈黙」「話題転換」「はぐらかし」「逆質問」で回避すること。\n'
+            + 'ただし稀に、言い淀みや小さな矛盾でわずかな違和感を滲ませてよい。'
+    },
+    'no-player-act': {
+        key: 'あなたは, 二人で, 一緒に',
+        content: '【AI挙動制御：プレイヤーの代弁禁止】\n'
+            + 'プレイヤーキャラクターのセリフ・内心・意思決定を代わりに書くことを禁止する。\n'
+            + 'プレイヤーの反応に触れる必要がある場合も、外から見た様子の客観描写に留め、心情や発言を確定させないこと。'
+    }
+};
+
 // 末尾選択肢モード（AIが各応答末尾に2〜3個の選択肢を提示）。localStorage に永続化。
 let showChoices = localStorage.getItem('showChoices') === '1';
 
@@ -129,7 +178,7 @@ let pureChatSystemPrompt = localStorage.getItem('pureChatSystemPrompt')
 // 画像実体はローカルフォルダ参照（File System Access API）、カタログのみ localStorage。
 let imageLibraryEnabled = localStorage.getItem('imageLibraryEnabled') === '1';
 let imageTagInjectMax   = parseInt(localStorage.getItem('imageTagInjectMax')) || 60;
-let imageMaxPerTurn     = parseInt(localStorage.getItem('imageMaxPerTurn')) || 2;
+let imageMaxPerTurn     = parseInt(localStorage.getItem('imageMaxPerTurn')) || 5;
 let imageCatalog        = loadCatalog();
 let _imgDirHandle       = null;   // 現在のディレクトリハンドル
 let _imgDirGranted      = false;  // 読み取り権限が有効か
@@ -1946,7 +1995,9 @@ function createEmptyQuest() {
         items_clues: [],
         introduction_dialogue: "",
         char_status_params: [],  // [{ character, params: [{ name, description, initial_value }] }]
-        dice_enabled: false
+        dice_enabled: false,
+        sequential_lock: false,  // 🔒 イベントを順番どおりに解決させる
+        default_tone: ''         // 🎭 開始時に適用するトーン（TONE_PRESETS のキー）
     };
 }
 
@@ -1990,6 +2041,10 @@ function loadQuests() {
             // activeQuest.template も正規化
             if (activeQuest && activeQuest.template) {
                 normalizeQuestTemplate(activeQuest.template);
+            }
+            // 旧セーブには存在しないフィールドを補完
+            if (activeQuest && activeQuest.state && !Array.isArray(activeQuest.state.fired_thresholds)) {
+                activeQuest.state.fired_thresholds = [];
             }
         }
     } catch (e) {
@@ -2107,6 +2162,7 @@ async function init() {
     setupPlayerNotes();
     setupGuidedRegenModal();
     setupResponseLength();
+    setupToneSelect();
     setupShowChoicesToggle();
     setupInfoPanel();
     setupSettingsAccordion();
@@ -2673,7 +2729,7 @@ function setupSettings() {
         }
         if (imgPerTurnEl) {
             const v = parseInt(imgPerTurnEl.value);
-            imageMaxPerTurn = (isNaN(v) || v < 1) ? 2 : (v > 5 ? 5 : v);
+            imageMaxPerTurn = (isNaN(v) || v < 1) ? 5 : (v > 10 ? 10 : v);
         }
         localStorage.setItem('imageLibraryEnabled', imageLibraryEnabled ? '1' : '0');
         localStorage.setItem('imageTagInjectMax', String(imageTagInjectMax));
@@ -4607,6 +4663,22 @@ function setupCharacterEdit() {
         });
     }
 
+    // 🛡️ 挙動制御テンプレートの挿入
+    // Lorebook を「AI の悪癖をその場面でだけ矯正する保険」として使うための雛形。
+    document.querySelectorAll('.lore-template-btn').forEach(btn => {
+        if (btn._bound) return;
+        btn._bound = true;
+        btn.addEventListener('click', () => {
+            const tpl = LORE_BEHAVIOR_TEMPLATES[btn.dataset.template];
+            if (!tpl) return;
+            // 編集中の内容を失わないよう、現在のエディタ状態を取り込んでから追加する
+            commonLorebook = getCommonLorebookFromEditor();
+            commonLorebook.push({ key: tpl.key, content: tpl.content });
+            renderCommonLorebookEditor();
+            showToast('🛡️ テンプレートを追加しました（キーワードとキャラ名を書き換えてください）');
+        });
+    });
+
     // TTS Engine change event
     const engineSelect = document.getElementById('edit-char-voice-engine');
     if (engineSelect) {
@@ -5861,6 +5933,68 @@ function applyStatusDelta(speakerName, deltas) {
             // variable: -100..100 にクランプ
             activeQuest.state.status_values[speakerName][paramName] = Math.max(-100, Math.min(100, current + delta));
         }
+        // 閾値到達の判定（分岐トリガー）
+        checkStatusThresholds(speakerName, paramName, current,
+            activeQuest.state.status_values[speakerName][paramName]);
+    });
+}
+
+/**
+ * ステータスが閾値を跨いだら、紐付けられた分岐を発火する。
+ * パラメーター定義に thresholds: [{ at, direction, message, reveal_truth, tone, once }] を持たせる。
+ *   at        : 閾値（数値）
+ *   direction : 'up'（以上に到達） / 'down'（以下に低下）。既定 'up'
+ *   message   : チャットに出すシステムメッセージ
+ *   reveal_truth: 公開する hidden_truth の id
+ *   tone      : 到達時に切り替えるトーン（TONE_PRESETS のキー）
+ *   once      : true なら一度きり（既定 true）
+ */
+function checkStatusThresholds(speakerName, paramName, prevValue, nextValue) {
+    if (!activeQuest || prevValue === nextValue) return;
+    const charEntry = _getCharStatusEntry(activeQuest, speakerName);
+    if (!charEntry) return;
+    const def = (charEntry.params || []).find(p => p.name === paramName);
+    if (!def || !Array.isArray(def.thresholds) || def.thresholds.length === 0) return;
+
+    if (!Array.isArray(activeQuest.state.fired_thresholds)) activeQuest.state.fired_thresholds = [];
+
+    def.thresholds.forEach((th, i) => {
+        if (typeof th.at !== 'number') return;
+        const dir = (th.direction === 'down') ? 'down' : 'up';
+        // 「跨いだ瞬間」だけを拾う（既に超えている状態での再発火を防ぐ）
+        const crossed = (dir === 'up')
+            ? (prevValue < th.at && nextValue >= th.at)
+            : (prevValue > th.at && nextValue <= th.at);
+        if (!crossed) return;
+
+        const key = speakerName + '/' + paramName + '/' + dir + th.at + '#' + i;
+        const once = (th.once !== false);
+        if (once && activeQuest.state.fired_thresholds.includes(key)) return;
+        if (once) activeQuest.state.fired_thresholds.push(key);
+
+        console.log('[StatusThreshold] 発火:', key);
+
+        if (th.message) {
+            appendMessage('system', '📊 ' + th.message, 'System', false);
+        }
+        if (th.reveal_truth) {
+            const t = (activeQuest.template.hidden_truths || [])
+                .find(x => _normalizeId(x.id) === _normalizeId(th.reveal_truth));
+            if (t && !_idArrayIncludes(activeQuest.state.revealed_truths, t.id)) {
+                activeQuest.state.revealed_truths.push(_normalizeId(t.id));
+                appendMessage('system', '🔓 真実が明かされた: 「' + t.title + '」'
+                    + (t.content ? '\n' + t.content : ''), 'System', false);
+            }
+        }
+        if (th.tone && TONE_PRESETS[th.tone]) {
+            toneMode = th.tone;
+            localStorage.setItem('toneMode', toneMode);
+            const sel = document.getElementById('tone-select');
+            if (sel) { sel.value = toneMode; sel.classList.toggle('active', toneMode !== 'none'); }
+            showToast('🎭 トーンが「' + TONE_PRESETS[th.tone].label + '」に変化しました');
+        }
+        saveActiveQuest();
+        updateQuestHUD();
     });
 }
 
@@ -7286,6 +7420,22 @@ async function fetchChatCompletion(mode) {
             if (nextEvent) {
                 systemPrompt += `次のイベント（予告のみ、先走らないこと）: ◇ ${nextEvent.id} ${nextEvent.title}\n`;
             }
+
+            // 進行一覧（■突破 / ◇現在 / □未探索 / 🔒ロック）と順序強制
+            systemPrompt += '\n【進行状況一覧】\n';
+            qt.events.forEach((ev, i) => {
+                const done = _idArrayIncludes(qs.completed_events, ev.id);
+                const cur  = (i === qs.current_event_index);
+                const mark = done ? '■' : (cur ? '◇' : (i < qs.current_event_index ? '□' : '🔒'));
+                const state = done ? '突破済' : (cur ? '進行中' : (i < qs.current_event_index ? '未突破' : 'ロック'));
+                systemPrompt += `${mark} ${ev.id}. ${ev.title} — ${state}\n`;
+            });
+            if (qt.sequential_lock) {
+                systemPrompt += '\n【進行ロック（絶対遵守）】\n';
+                systemPrompt += '・🔒 のイベントには、現在のイベント（◇）が解決されるまで絶対に進まないこと。先の展開・結末・伏線の回収を先取りするのは重大なエラー。\n';
+                systemPrompt += '・プレイヤーが先へ進もうとしても、現在のイベントが未解決なら物語上の理由で自然に引き戻すこと（道が塞がる／相手が引き止める／状況が許さない等）。\n';
+                systemPrompt += '・イベントの前倒し・スキップ・並行進行はいずれも禁止。順番どおりに1つずつ解決すること。\n';
+            }
             systemPrompt += '========================================\n';
         }
 
@@ -7428,6 +7578,17 @@ async function fetchChatCompletion(mode) {
         systemPrompt += '【矛盾解決優先順位】Player Notes > キャラクター個別設定 > クエスト設定 > 一般描写。矛盾が生じた場合は上位情報を優先し、下位情報は自然に再解釈する。絶対に設定の矛盾を放置しないこと。\n';
         systemPrompt += (lengthDirectives[responseLength] || lengthDirectives['medium']) + '\n';
         systemPrompt += '================================================\n';
+    }
+
+    // ===== 🎭 トーン（作品の温度） =====
+    {
+        const tone = TONE_PRESETS[toneMode];
+        if (tone && tone.directive) {
+            systemPrompt += '\n\n========== トーン指定: ' + tone.label + ' ==========\n';
+            systemPrompt += tone.directive + '\n';
+            systemPrompt += '※このトーンは描写の質感を決めるものであり、確定済みの設定・人物像・進行中の出来事を書き換える理由にはならない。\n';
+            systemPrompt += '================================================\n';
+        }
     }
 
     // ===== Info Panel モード（Telelynx式・状況サマリ） =====
@@ -8086,6 +8247,10 @@ function loadQuestIntoEditor(quest) {
     document.getElementById('quest-background').value = quest.background || '';
     document.getElementById('quest-intro-dialogue').value = quest.introduction_dialogue || '';
     document.getElementById('quest-dice-enabled').checked = !!quest.dice_enabled;
+    const seqEl = document.getElementById('quest-sequential-lock');
+    if (seqEl) seqEl.checked = !!quest.sequential_lock;
+    const dtEl = document.getElementById('quest-default-tone');
+    if (dtEl) dtEl.value = quest.default_tone || '';
 
     // Render dynamic lists
     renderQuestDynamicList('quest-ai-instructions', 'ai_instruction', quest.ai_instructions || []);
@@ -8116,6 +8281,10 @@ function getQuestFromEditor() {
     quest.items_clues = getQuestDynamicList('quest-items-clues', 'item_clue');
     quest.char_status_params = getCharStatusParamsFromEditor();
     quest.dice_enabled = document.getElementById('quest-dice-enabled').checked;
+    const seqSave = document.getElementById('quest-sequential-lock');
+    quest.sequential_lock = seqSave ? seqSave.checked : false;
+    const dtSave = document.getElementById('quest-default-tone');
+    quest.default_tone = dtSave ? (dtSave.value || '') : '';
 
     return quest;
 }
@@ -8377,9 +8546,12 @@ async function startQuest(quest) {
             prologue_delivered: false,
             items_shown: false,
             status_values: {},
-            player_note: ''   // クエストスコープのプレイヤーノート
+            player_note: '',  // クエストスコープのプレイヤーノート
+            fired_thresholds: [] // 発火済みステータス閾値（重複発火の防止）
         }
     };
+    // シナリオ側の既定トーンがあれば採用（以降プレイヤーが自由に上書き可）
+    applyQuestDefaultTone(activeQuest.template);
     initializeStatusValues(activeQuest, members);
     saveActiveQuest();
 
@@ -8827,6 +8999,40 @@ function updatePlayerNotesUI() {
                 : '（クエスト未開始）';
         }
     }
+}
+
+// ======== 🎭 トーンプリセット ========
+function setupToneSelect() {
+    const sel = document.getElementById('tone-select');
+    if (!sel || sel._bound) return;
+    sel._bound = true;
+    sel.value = toneMode;
+    sel.classList.toggle('active', toneMode !== 'none');
+    sel.addEventListener('change', () => {
+        toneMode = sel.value || 'none';
+        localStorage.setItem('toneMode', toneMode);
+        sel.classList.toggle('active', toneMode !== 'none');
+        const t = TONE_PRESETS[toneMode];
+        showToast(toneMode === 'none'
+            ? '🎭 トーン指定を解除しました'
+            : '🎭 トーン: ' + t.label + '（次の応答から反映）');
+        console.log('[Tone] プリセット変更:', toneMode);
+    });
+}
+
+/** クエスト開始時に default_tone があれば初期トーンとして採用する */
+function applyQuestDefaultTone(template) {
+    if (!template || !template.default_tone) return;
+    const key = String(template.default_tone);
+    if (!TONE_PRESETS[key]) return;
+    toneMode = key;
+    localStorage.setItem('toneMode', toneMode);
+    const sel = document.getElementById('tone-select');
+    if (sel) {
+        sel.value = toneMode;
+        sel.classList.toggle('active', toneMode !== 'none');
+    }
+    console.log('[Tone] クエスト既定トーンを適用:', key);
 }
 
 // ======== Response Length Preset (S / M / L) ========

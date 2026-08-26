@@ -210,6 +210,19 @@
                                 <button class="resp-len-btn" data-length="medium" title="標準: 1〜3段落。バランス型">M</button>
                                 <button class="resp-len-btn" data-length="long" title="詳細: 4段落以上。情景・感情を丁寧に">L</button>
                             </div>
+                            <!-- 🎭 トーンプリセット（作品の温度をいつでも切替） -->
+                            <select id="tone-select" title="トーン: 描写の質感を切り替えます（設定や進行は変わりません）">
+                                <option value="none">🎭 トーン</option>
+                                <option value="comical">コミカル</option>
+                                <option value="horror">ホラー</option>
+                                <option value="serious">シリアス</option>
+                                <option value="emotional">感動</option>
+                                <option value="lunatic">ルナティック</option>
+                                <option value="hardboiled">ハードボイルド</option>
+                                <option value="heartwarming">ほのぼの</option>
+                            </select>
+                            <div style="display:none;">
+                            </div>
                             <!-- 末尾選択肢生成モード（Telelynx式） -->
                             <button id="show-choices-toggle" title="末尾選択肢モード: AIが各応答末尾にプレイヤー行動候補を3つ提案します（ON/OFFトグル）">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
@@ -399,6 +412,20 @@
                     <button id="add-common-lore-btn" class="secondary-btn" style="flex: 2;">+ エントリを追加</button>
                     <button id="save-common-lore-btn" class="primary-btn" style="flex: 1;">保存</button>
                 </div>
+
+                <h3 class="sub-section-title" style="margin-top:2rem;">🛡️ 挙動制御テンプレート</h3>
+                <p class="hint">Lorebook は「世界観の知識」だけでなく、<strong>AI の悪癖を矯正する保険</strong>としても使えます。<br>
+                キーワードが会話に出た瞬間だけ注入されるので、常時プロンプトを重くせずにキャラ崩れを防げます。</p>
+                <div class="flex-row" style="flex-wrap:wrap; gap:0.4rem;">
+                    <button class="secondary-btn lore-template-btn" data-template="no-sacrifice" style="flex:1 1 200px;">自己犠牲・物分かりの良さ禁止</button>
+                    <button class="secondary-btn lore-template-btn" data-template="no-summary" style="flex:1 1 200px;">勝手な話の畳み方を禁止</button>
+                    <button class="secondary-btn lore-template-btn" data-template="keep-secret" style="flex:1 1 200px;">秘密の保持（禁止ワード）</button>
+                    <button class="secondary-btn lore-template-btn" data-template="no-player-act" style="flex:1 1 200px;">プレイヤーの代弁を禁止</button>
+                </div>
+                <p class="hint" style="background: rgba(76,175,80,0.08); padding:0.75rem; border-radius:8px; border-left:3px solid #4caf50; margin-top:1rem;">
+                💡 ボタンを押すとテンプレートがエントリとして追加されます。<strong>キーワードとキャラ名は必ず自分の作品に合わせて書き換えてください</strong>。<br>
+                コツ: キーワードには「AIがその悪癖を出しそうな場面で登場する語」を選ぶと、必要なときだけ効きます。
+                </p>
             </div>
         </div>
 
@@ -498,6 +525,24 @@
                         </div>
                         <div class="form-group">
                             <label><input type="checkbox" id="quest-dice-enabled"> ダイスロール機能を有効化（TRPG判定）</label>
+                        </div>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="quest-sequential-lock"> 🔒 イベント進行ロック（順番どおりに1つずつ解決）</label>
+                            <div class="hint">AI がイベントを先取り・スキップするのを防ぎます。「前を突破するまで次へ進めない」謎解き・探索型シナリオ向け</div>
+                        </div>
+                        <div class="form-group">
+                            <label>🎭 既定のトーン</label>
+                            <select id="quest-default-tone">
+                                <option value="">指定なし（プレイヤー設定を維持）</option>
+                                <option value="comical">コミカル</option>
+                                <option value="horror">ホラー</option>
+                                <option value="serious">シリアス</option>
+                                <option value="emotional">感動</option>
+                                <option value="lunatic">ルナティック</option>
+                                <option value="hardboiled">ハードボイルド</option>
+                                <option value="heartwarming">ほのぼの</option>
+                            </select>
+                            <div class="hint">クエスト開始時に適用される初期トーン。プレイヤーはチャット欄からいつでも変更できます</div>
                         </div>
                     </div>
 
@@ -679,8 +724,8 @@
                 </div>
                 <div class="form-group">
                     <label>1応答あたりの最大表示枚数</label>
-                    <input type="number" id="image-max-per-turn" min="1" max="5" value="2" style="width:120px;">
-                    <div class="hint">AI が多数のタグを出しても、この枚数までしか表示しません</div>
+                    <input type="number" id="image-max-per-turn" min="1" max="10" value="5" style="width:120px;">
+                    <div class="hint">AI が多数のタグを出しても、この枚数までしか表示しません。会話劇でキャラごとに立ち絵を出す場合は多めに（推奨 4〜6）</div>
                 </div>
                 <p class="hint" style="background: rgba(76,175,80,0.08); padding:0.75rem; border-radius:8px; border-left:3px solid #4caf50;">
                 💡 画像はフォルダを参照するだけなので、<strong>何百枚登録してもブラウザ容量をほとんど消費しません</strong>。<br>
