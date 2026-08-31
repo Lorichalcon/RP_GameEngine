@@ -544,6 +544,23 @@
                             </select>
                             <div class="hint">クエスト開始時に適用される初期トーン。プレイヤーはチャット欄からいつでも変更できます</div>
                         </div>
+                        <div class="form-group">
+                            <label>📊 Info Panel テンプレート</label>
+                            <div class="flex-row" style="gap:0.4rem; margin-bottom:0.4rem;">
+                                <select id="info-panel-preset" style="flex:1;">
+                                    <option value="">プリセットから挿入…</option>
+                                    <option value="basic">基本（汎用）</option>
+                                    <option value="daily">日常・学園</option>
+                                    <option value="adventure">冒険・探索</option>
+                                    <option value="mystery">ミステリー・推理</option>
+                                    <option value="horror">ホラー・サバイバル</option>
+                                    <option value="critic">メタ評価つき（ごーしちGO式）</option>
+                                </select>
+                                <button type="button" id="info-panel-clear-btn" class="secondary-btn" style="padding:6px 12px;">クリア</button>
+                            </div>
+                            <textarea id="quest-info-panel-template" rows="10" placeholder="空欄なら汎用の既定フォーマットが使われます。&#10;プリセットを選んでから自由に書き換えてください。" style="width:100%; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text-primary); padding:12px; border-radius:8px; font-family:inherit; resize:vertical; font-size:0.85rem;"></textarea>
+                            <div class="hint">応答末尾に出る状況サマリの中身を定義します。<code>【見出し】</code>で区切り、1〜2行にまとめると読みやすくなります。<code>{{user}}</code> はプレイヤー名に置換されます</div>
+                        </div>
                     </div>
 
                     <!-- Selection Text -->

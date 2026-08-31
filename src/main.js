@@ -72,6 +72,85 @@ const TONE_PRESETS = {
 };
 let toneMode = localStorage.getItem('toneMode') || 'none';
 
+// ======== 📊 Info Panel テンプレート プリセット ========
+// 作品ごとに必要な情報は全く違うため、あくまで叩き台。選んでから自由に書き換えて使う。
+// ここに書いた内容が [INFO] ブロックの中身として AI に指示される。
+const INFO_PANEL_PRESETS = {
+    basic: {
+        label: '基本（汎用）',
+        template:
+            '【現在の状況】\n' +
+            '日時: [年月日 時刻] | 場所: [現在地] | 周囲: [周辺の状況・空気]\n\n' +
+            '【ユーザーの情報】\n' +
+            '所属: [所属組織] | 地位: [立場] | 状態: [心身の状態]\n\n' +
+            '【登場キャラ】\n' +
+            '[キャラ名] - [簡単な現在の状況・行動] | ...'
+    },
+    daily: {
+        label: '日常・学園',
+        template:
+            '【現在の状況】\n' +
+            '🗓️ [月日(曜日)] ⏰ [時刻] | 📍 [現在地] | 🌤️ [天気]\n\n' +
+            '【{{user}}】\n' +
+            '💭 [心の声を30字以内] | 👕 [服装]\n\n' +
+            '【一緒にいる人】\n' +
+            '[キャラ名]（[{{user}}への感情]）— 💭 [今の気持ちを30字以内]\n\n' +
+            '【今日の予定】\n' +
+            '・[予定を最大3つ。無ければ「特になし」]'
+    },
+    adventure: {
+        label: '冒険・探索',
+        template:
+            '【現在地】\n' +
+            '📍 [場所] | 🕐 [時間帯] | 🌡️ [環境・危険度]\n\n' +
+            '【パーティ状態】\n' +
+            '[キャラ名] — HP:[状態] / 気力:[状態] / 装備:[主武装]\n\n' +
+            '【所持品・手がかり】\n' +
+            '・[重要なアイテムや情報を最大5つ]\n\n' +
+            '【当面の目的】\n' +
+            '🎯 [今やるべきこと] （進捗: [達成度]）'
+    },
+    mystery: {
+        label: 'ミステリー・推理',
+        template:
+            '【状況】\n' +
+            '📍 [現在地] | ⏰ [時刻] | 🌫️ [場の空気]\n\n' +
+            '【判明している事実】\n' +
+            '・[確定した情報のみを列挙。推測は書かない]\n\n' +
+            '【未解決の疑問】\n' +
+            '❓ [まだ分かっていないこと]\n\n' +
+            '【関係者の様子】\n' +
+            '[人物名] — [態度・不審な点があれば]'
+    },
+    horror: {
+        label: 'ホラー・サバイバル',
+        template:
+            '【現在地】\n' +
+            '📍 [場所] | 🕯️ [明るさ] | 🔇 [音の状況]\n\n' +
+            '【{{user}}の状態】\n' +
+            '🫀 正気度: [高い/揺らいでいる/危険] | 🩹 負傷: [有無]\n' +
+            '💭 [心の声を30字以内]\n\n' +
+            '【脅威】\n' +
+            '⚠️ [認識している危険 / 未知なら「不明」]\n\n' +
+            '【逃走経路】\n' +
+            '🚪 [把握している出口・退路]'
+    },
+    critic: {
+        label: 'メタ評価つき（ごーしちGO式）',
+        template:
+            '【シーン】\n' +
+            '📍 [現在地] | [場の状況]\n\n' +
+            '【登場人物の反応】\n' +
+            '[キャラ名]: [一言コメント]\n\n' +
+            '【メタ評価】\n' +
+            '※ここだけは物語の登場人物としてではなく、AI として中立・現実的に評価すること。\n' +
+            '※作中の人物が絶賛していても忖度せず、客観的な出来栄えで判定する。\n' +
+            '対象: [直前のプレイヤーの行動や発言]\n' +
+            '講評: [良い点と弱点を簡潔に。世辞抜き]\n' +
+            '評価: [F〜S の6段階]'
+    }
+};
+
 // ======== 🛡️ Lorebook 挙動制御テンプレート ========
 // Lorebook は本来「世界観の知識」を注入する仕組みだが、キーワード一致でだけ注入される性質を利用して
 // 「AI がその悪癖を出しそうな場面でのみ、矯正指示を差し込む」保険としても使える。
@@ -1997,7 +2076,8 @@ function createEmptyQuest() {
         char_status_params: [],  // [{ character, params: [{ name, description, initial_value }] }]
         dice_enabled: false,
         sequential_lock: false,  // 🔒 イベントを順番どおりに解決させる
-        default_tone: ''         // 🎭 開始時に適用するトーン（TONE_PRESETS のキー）
+        default_tone: '',        // 🎭 開始時に適用するトーン（TONE_PRESETS のキー）
+        info_panel_template: ''  // 📊 Info Panel の中身（空なら汎用フォーマット）
     };
 }
 
@@ -7593,8 +7673,10 @@ async function fetchChatCompletion(mode) {
 
     // ===== Info Panel モード（Telelynx式・状況サマリ） =====
     if (infoPanelEnabled) {
+        // {{user}} 等のマクロはここで実キャラ名に展開してから渡す
+        // （そのまま渡すと AI がリテラルで出力してしまう）
         const questTemplate = (activeQuest && activeQuest.template && activeQuest.template.info_panel_template)
-            ? activeQuest.template.info_panel_template.trim()
+            ? applyMacros(activeQuest.template.info_panel_template.trim())
             : '';
 
         systemPrompt += '\n\n========== Info Panel モード ==========\n';
@@ -8074,6 +8156,34 @@ async function _executeChatRequest(messages) {
 let editingQuestId = null; // ID of quest being edited, null for new quest
 
 function setupQuestUI() {
+    // 📊 Info Panel テンプレートのプリセット挿入 / クリア
+    const ipPresetSel = document.getElementById('info-panel-preset');
+    const ipTextarea  = document.getElementById('quest-info-panel-template');
+    if (ipPresetSel && ipTextarea && !ipPresetSel._bound) {
+        ipPresetSel._bound = true;
+        ipPresetSel.addEventListener('change', () => {
+            const preset = INFO_PANEL_PRESETS[ipPresetSel.value];
+            if (!preset) return;
+            // 既に書いてある内容を消さないよう、空でなければ確認する
+            if (ipTextarea.value.trim() &&
+                !confirm('現在の内容を「' + preset.label + '」で置き換えますか？')) {
+                ipPresetSel.value = '';
+                return;
+            }
+            ipTextarea.value = preset.template;
+            ipPresetSel.value = '';
+            showToast('📊 「' + preset.label + '」を挿入しました（自由に書き換えてください）');
+        });
+    }
+    const ipClearBtn = document.getElementById('info-panel-clear-btn');
+    if (ipClearBtn && ipTextarea && !ipClearBtn._bound) {
+        ipClearBtn._bound = true;
+        ipClearBtn.addEventListener('click', () => {
+            if (ipTextarea.value.trim() && !confirm('テンプレートを空にしますか？（汎用フォーマットに戻ります）')) return;
+            ipTextarea.value = '';
+        });
+    }
+
     // Import quest file
     const importInput = document.getElementById('import-quest-file');
     if (importInput) {
@@ -8251,6 +8361,8 @@ function loadQuestIntoEditor(quest) {
     if (seqEl) seqEl.checked = !!quest.sequential_lock;
     const dtEl = document.getElementById('quest-default-tone');
     if (dtEl) dtEl.value = quest.default_tone || '';
+    const ipEl = document.getElementById('quest-info-panel-template');
+    if (ipEl) ipEl.value = quest.info_panel_template || '';
 
     // Render dynamic lists
     renderQuestDynamicList('quest-ai-instructions', 'ai_instruction', quest.ai_instructions || []);
@@ -8285,6 +8397,8 @@ function getQuestFromEditor() {
     quest.sequential_lock = seqSave ? seqSave.checked : false;
     const dtSave = document.getElementById('quest-default-tone');
     quest.default_tone = dtSave ? (dtSave.value || '') : '';
+    const ipSave = document.getElementById('quest-info-panel-template');
+    quest.info_panel_template = ipSave ? ipSave.value : '';
 
     return quest;
 }
