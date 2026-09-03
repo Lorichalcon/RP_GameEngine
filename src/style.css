@@ -3645,26 +3645,101 @@ main {
   .library-inline-image { max-height: 300px; }
 }
 
-/* ======== 🎭 トーンプリセット セレクト（チャットツールバー内） ======== */
-#tone-select {
+/* ======== 🎭 トーンプリセット ピッカー（チャットツールバー内・複数選択対応） ======== */
+.tone-picker { position: relative; align-self: center; }
+#tone-btn {
   height: 36px;
-  align-self: center;
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
   border-radius: 9px;
-  padding: 0 8px;
+  padding: 0 10px;
   font-family: inherit;
   font-size: 0.8rem;
   cursor: pointer;
-  max-width: 130px;
+  max-width: 190px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: all 0.2s;
 }
-#tone-select:hover { background: rgba(255, 255, 255, 0.12); }
-#tone-select.active {
+#tone-btn:hover { background: rgba(255, 255, 255, 0.12); }
+#tone-btn.active {
   background: rgba(186, 104, 200, 0.22);
   border-color: rgba(186, 104, 200, 0.6);
   color: #e0b0ff;
   font-weight: 600;
 }
-#tone-select option { background: #1e2030; color: var(--text-primary); }
+.tone-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  width: 268px;
+  padding: 10px;
+  background: #1e2030;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.tone-menu-head {
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.tone-menu-head strong { color: #e0b0ff; }
+.tone-menu-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+#tone-menu-summary {
+  font-size: 0.75rem;
+  color: #e0b0ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#tone-clear-btn { padding: 4px 10px; font-size: 0.72rem; flex-shrink: 0; }
+
+/* チェックリスト本体（チャットツールバーとクエストエディタで共用） */
+.tone-check-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tone-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+}
+.tone-check:hover { background: rgba(255, 255, 255, 0.1); }
+.tone-check.checked {
+  background: rgba(186, 104, 200, 0.2);
+  border-color: rgba(186, 104, 200, 0.55);
+  color: #e0b0ff;
+}
+.tone-check input { margin: 0; cursor: pointer; }
+.tone-order-badge:not(:empty) {
+  padding: 1px 5px;
+  background: rgba(186, 104, 200, 0.45);
+  border-radius: 5px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .tone-menu { width: min(268px, calc(100vw - 32px)); }
+  #tone-btn { max-width: 120px; }
+}

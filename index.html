@@ -210,17 +210,21 @@
                                 <button class="resp-len-btn" data-length="medium" title="標準: 1〜3段落。バランス型">M</button>
                                 <button class="resp-len-btn" data-length="long" title="詳細: 4段落以上。情景・感情を丁寧に">L</button>
                             </div>
-                            <!-- 🎭 トーンプリセット（作品の温度をいつでも切替） -->
-                            <select id="tone-select" title="トーン: 描写の質感を切り替えます（設定や進行は変わりません）">
-                                <option value="none">🎭 トーン</option>
-                                <option value="comical">コミカル</option>
-                                <option value="horror">ホラー</option>
-                                <option value="serious">シリアス</option>
-                                <option value="emotional">感動</option>
-                                <option value="lunatic">ルナティック</option>
-                                <option value="hardboiled">ハードボイルド</option>
-                                <option value="heartwarming">ほのぼの</option>
-                            </select>
+                            <!-- 🎭 トーンプリセット（作品の温度をいつでも切替・複数選択で混合） -->
+                            <div class="tone-picker" id="tone-picker">
+                                <button type="button" id="tone-btn" title="トーン: 描写の質感を切り替えます（設定や進行は変わりません）。複数選ぶと混合トーンになります">🎭 トーン</button>
+                                <div class="tone-menu" id="tone-menu" hidden>
+                                    <div class="tone-menu-head">
+                                        複数選ぶと<strong>混合トーン</strong>になります。<br>
+                                        最初に選んだものが<strong>基調</strong>、以降は<strong>アクセント</strong>として重なります。
+                                    </div>
+                                    <div class="tone-check-list" id="tone-menu-list"></div>
+                                    <div class="tone-menu-foot">
+                                        <span id="tone-menu-summary">指定なし</span>
+                                        <button type="button" id="tone-clear-btn" class="secondary-btn">解除</button>
+                                    </div>
+                                </div>
+                            </div>
                             <div style="display:none;">
                             </div>
                             <!-- 末尾選択肢生成モード（Telelynx式） -->
@@ -532,17 +536,8 @@
                         </div>
                         <div class="form-group">
                             <label>🎭 既定のトーン</label>
-                            <select id="quest-default-tone">
-                                <option value="">指定なし（プレイヤー設定を維持）</option>
-                                <option value="comical">コミカル</option>
-                                <option value="horror">ホラー</option>
-                                <option value="serious">シリアス</option>
-                                <option value="emotional">感動</option>
-                                <option value="lunatic">ルナティック</option>
-                                <option value="hardboiled">ハードボイルド</option>
-                                <option value="heartwarming">ほのぼの</option>
-                            </select>
-                            <div class="hint">クエスト開始時に適用される初期トーン。プレイヤーはチャット欄からいつでも変更できます</div>
+                            <div class="tone-check-list" id="quest-default-tone-list"></div>
+                            <div class="hint">クエスト開始時に適用される初期トーン。<strong>複数選ぶと混合トーン</strong>（最初に選んだものが基調）。何も選ばなければプレイヤー設定を維持します。プレイヤーはチャット欄からいつでも変更できます</div>
                         </div>
                         <div class="form-group">
                             <label>📊 Info Panel テンプレート</label>

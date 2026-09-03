@@ -64,6 +64,7 @@ const TONE_PRESETS = {
     none:        { label: '指定なし', directive: '' },
     comical:     { label: 'コミカル',      directive: '物理法則や常識を無視した過剰な誇張と、シュールな展開を軸に、バカバカしさを追求して描写すること。深刻な事態であってもギャグやドタバタ劇に変換し、シリアスな緊張感を意図的に破壊する。大げさなリアクション、軽妙でテンポの良い会話、滑稽な擬音語を多用し、エンターテインメント性を最優先すること。' },
     horror:      { label: 'ホラー',        directive: '閉塞感と、肌にまとわりつくような不快な湿り気を五感に訴えて描写すること。直接的な流血より、得体の知れない気配・不自然な静寂・視線など心理的圧迫を強調する。「逃げ場がない」「何かがおかしい」という絶望感とジワジワとした嫌悪感を与える空気を構築すること。' },
+    erotic:      { label: 'エロス',        directive: '官能性を、直接的・即物的な肉体描写ではなく空気で表現すること。交錯する視線、熱を帯びた呼吸、衣擦れ、間合いの詰まり方といった機微を積み重ね、緊張と期待を醸成する。抑圧された環境や日常のすぐ裏側に潜む欲望を匂わせるように配置し、露骨さよりも背徳感と余韻を優先すること。' },
     serious:     { label: 'シリアス',      directive: '論理的整合性と緊張感を最優先し、上質なミステリー／サスペンスとして成立する重厚な描写を行うこと。安易な救済・過剰な感情表現・ご都合主義を排除する。複雑な心理的葛藤、張り詰めた空気、命のやり取りの重量感を客観的かつ精緻な語彙で描くこと。' },
     emotional:   { label: '感動',          directive: '深い悲哀・自己犠牲・美しい絆を情感豊かに叙情的な文体で描写すること。微細な感情の揺れ動きを中心に描き、風景描写と心情をリンクさせる手法を多用する。言葉の美しさと読後の余韻を重視したドラマチックな構成にすること。' },
     lunatic:     { label: 'ルナティック',  directive: '論理や倫理が崩壊した、狂気が支配する異常な世界を描写すること。登場人物はまともな判断力を欠いている。支離滅裂な言動、倒錯した価値観、危険な事象への歓喜など、健常な理解を拒む心理状態をテキストに反映する。文脈の飛躍や不気味な反復を交え、読み手が不安を覚える質感を出すこと。' },
@@ -71,6 +72,29 @@ const TONE_PRESETS = {
     heartwarming:{ label: 'ほのぼの',      directive: '穏やかで温かい日常の手触りを丁寧に描写すること。大きな事件よりも、些細なやり取り・食事・季節の移ろいといった生活の質感を重ねる。登場人物同士の気安さと安心感を軸に、読後に穏やかな余韻が残るよう構成すること。' }
 };
 let toneMode = localStorage.getItem('toneMode') || 'none';
+
+// 複数トーンの混合に対応する。toneMode は選択順を保った key のカンマ区切り（例 'comical,erotic'）。
+// 先頭が「基調」、以降が「アクセント」。'+' 区切りの手書き（コミカル+エロス）も受け付ける。
+function parseToneKeys(value) {
+    if (!value) return [];
+    const out = [];
+    String(value).split(/[,+|]/).forEach(raw => {
+        const k = raw.trim();
+        if (k && k !== 'none' && TONE_PRESETS[k] && !out.includes(k)) out.push(k);
+    });
+    return out;
+}
+function getToneKeys() { return parseToneKeys(toneMode); }
+function toneKeysToLabel(keys) { return keys.map(k => TONE_PRESETS[k].label).join(' + '); }
+
+/** トーンを設定し、localStorage と UI を同期する。戻り値は正規化後のキー配列 */
+function setToneKeys(keys) {
+    const uniq = parseToneKeys((keys || []).join(','));
+    toneMode = uniq.length > 0 ? uniq.join(',') : 'none';
+    localStorage.setItem('toneMode', toneMode);
+    updateToneButtonLabel();
+    return uniq;
+}
 
 // ======== 📊 Info Panel テンプレート プリセット ========
 // 作品ごとに必要な情報は全く違うため、あくまで叩き台。選んでから自由に書き換えて使う。
@@ -2076,7 +2100,7 @@ function createEmptyQuest() {
         char_status_params: [],  // [{ character, params: [{ name, description, initial_value }] }]
         dice_enabled: false,
         sequential_lock: false,  // 🔒 イベントを順番どおりに解決させる
-        default_tone: '',        // 🎭 開始時に適用するトーン（TONE_PRESETS のキー）
+        default_tone: '',        // 🎭 開始時に適用するトーン（TONE_PRESETS のキー。'comical,erotic' のように複数可・先頭が基調）
         info_panel_template: ''  // 📊 Info Panel の中身（空なら汎用フォーマット）
     };
 }
@@ -6026,7 +6050,7 @@ function applyStatusDelta(speakerName, deltas) {
  *   direction : 'up'（以上に到達） / 'down'（以下に低下）。既定 'up'
  *   message   : チャットに出すシステムメッセージ
  *   reveal_truth: 公開する hidden_truth の id
- *   tone      : 到達時に切り替えるトーン（TONE_PRESETS のキー）
+ *   tone      : 到達時に切り替えるトーン（TONE_PRESETS のキー。'horror,lunatic' のように複数可・先頭が基調）
  *   once      : true なら一度きり（既定 true）
  */
 function checkStatusThresholds(speakerName, paramName, prevValue, nextValue) {
@@ -6066,12 +6090,12 @@ function checkStatusThresholds(speakerName, paramName, prevValue, nextValue) {
                     + (t.content ? '\n' + t.content : ''), 'System', false);
             }
         }
-        if (th.tone && TONE_PRESETS[th.tone]) {
-            toneMode = th.tone;
-            localStorage.setItem('toneMode', toneMode);
-            const sel = document.getElementById('tone-select');
-            if (sel) { sel.value = toneMode; sel.classList.toggle('active', toneMode !== 'none'); }
-            showToast('🎭 トーンが「' + TONE_PRESETS[th.tone].label + '」に変化しました');
+        if (th.tone) {
+            const toneKeys = parseToneKeys(th.tone);
+            if (toneKeys.length > 0) {
+                setToneKeys(toneKeys);
+                showToast('🎭 トーンが「' + toneKeysToLabel(toneKeys) + '」に変化しました');
+            }
         }
         saveActiveQuest();
         updateQuestHUD();
@@ -7662,11 +7686,26 @@ async function fetchChatCompletion(mode) {
 
     // ===== 🎭 トーン（作品の温度） =====
     {
-        const tone = TONE_PRESETS[toneMode];
-        if (tone && tone.directive) {
+        const toneKeys = getToneKeys();
+        if (toneKeys.length === 1) {
+            const tone = TONE_PRESETS[toneKeys[0]];
             systemPrompt += '\n\n========== トーン指定: ' + tone.label + ' ==========\n';
             systemPrompt += tone.directive + '\n';
             systemPrompt += '※このトーンは描写の質感を決めるものであり、確定済みの設定・人物像・進行中の出来事を書き換える理由にはならない。\n';
+            systemPrompt += '================================================\n';
+        } else if (toneKeys.length >= 2) {
+            // 混合トーン。場面ごとに切り替えるのではなく一つの文体へ統合させる。
+            // 指示同士が衝突しうるため「先頭＝基調 / 以降＝アクセント」の優先順位を明示する。
+            systemPrompt += '\n\n========== トーン指定（混合）: ' + toneKeysToLabel(toneKeys) + ' ==========\n';
+            systemPrompt += '以下の複数のトーンを「混ぜて」描写すること。場面ごとに切り替えるのではなく、一つの文体へ統合する。\n';
+            systemPrompt += '先に挙げたものほど基調として強く働き、後のものは味付け（アクセント）として重ねること。\n';
+            systemPrompt += '指示同士が衝突する場合は基調トーンを優先し、後続トーンはその枠内で表現する。\n\n';
+            toneKeys.forEach((k, i) => {
+                const t = TONE_PRESETS[k];
+                systemPrompt += '【' + t.label + (i === 0 ? '（基調）' : '（アクセント）') + '】\n';
+                systemPrompt += t.directive + '\n\n';
+            });
+            systemPrompt += '※これらのトーンは描写の質感を決めるものであり、確定済みの設定・人物像・進行中の出来事を書き換える理由にはならない。\n';
             systemPrompt += '================================================\n';
         }
     }
@@ -8359,8 +8398,9 @@ function loadQuestIntoEditor(quest) {
     document.getElementById('quest-dice-enabled').checked = !!quest.dice_enabled;
     const seqEl = document.getElementById('quest-sequential-lock');
     if (seqEl) seqEl.checked = !!quest.sequential_lock;
-    const dtEl = document.getElementById('quest-default-tone');
-    if (dtEl) dtEl.value = quest.default_tone || '';
+    // 既定トーンは複数選択可。チェックリストを毎回組み直して選択順を反映する
+    buildToneCheckList(document.getElementById('quest-default-tone-list'),
+        parseToneKeys(quest.default_tone || ''));
     const ipEl = document.getElementById('quest-info-panel-template');
     if (ipEl) ipEl.value = quest.info_panel_template || '';
 
@@ -8395,8 +8435,8 @@ function getQuestFromEditor() {
     quest.dice_enabled = document.getElementById('quest-dice-enabled').checked;
     const seqSave = document.getElementById('quest-sequential-lock');
     quest.sequential_lock = seqSave ? seqSave.checked : false;
-    const dtSave = document.getElementById('quest-default-tone');
-    quest.default_tone = dtSave ? (dtSave.value || '') : '';
+    const dtSave = document.getElementById('quest-default-tone-list');
+    quest.default_tone = (dtSave && dtSave._order) ? dtSave._order.join(',') : '';
     const ipSave = document.getElementById('quest-info-panel-template');
     quest.info_panel_template = ipSave ? ipSave.value : '';
 
@@ -9116,37 +9156,131 @@ function updatePlayerNotesUI() {
 }
 
 // ======== 🎭 トーンプリセット ========
-function setupToneSelect() {
-    const sel = document.getElementById('tone-select');
-    if (!sel || sel._bound) return;
-    sel._bound = true;
-    sel.value = toneMode;
-    sel.classList.toggle('active', toneMode !== 'none');
-    sel.addEventListener('change', () => {
-        toneMode = sel.value || 'none';
-        localStorage.setItem('toneMode', toneMode);
-        sel.classList.toggle('active', toneMode !== 'none');
-        const t = TONE_PRESETS[toneMode];
-        showToast(toneMode === 'none'
-            ? '🎭 トーン指定を解除しました'
-            : '🎭 トーン: ' + t.label + '（次の応答から反映）');
-        console.log('[Tone] プリセット変更:', toneMode);
+// 単一選択ではなく「混合」を許す。選んだ順序に意味があり、先頭が基調・以降がアクセント。
+// そのため native の multi-select（＝文書順で返る）ではなくチェックボックス＋順序保持で実装する。
+
+/** TONE_PRESETS からチェックボックス群を描画する。container._order が選択順を保持する */
+function buildToneCheckList(container, initialKeys, onChange) {
+    if (!container) return;
+    container.innerHTML = '';
+    container._order = parseToneKeys((initialKeys || []).join(','));
+    Object.keys(TONE_PRESETS).forEach(key => {
+        if (key === 'none') return;
+        const label = document.createElement('label');
+        label.className = 'tone-check';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = key;
+        // 無名コントロールはブラウザのフォーム復元で位置ずれの原因になるため必ず名前を付ける
+        cb.name = container.id + '__' + key;
+        cb.setAttribute('autocomplete', 'off');
+        cb.checked = container._order.includes(key);
+        cb.addEventListener('change', () => {
+            if (cb.checked) {
+                if (!container._order.includes(key)) container._order.push(key);
+            } else {
+                container._order = container._order.filter(k => k !== key);
+            }
+            refreshToneCheckList(container);
+            if (onChange) onChange(container._order.slice());
+        });
+        const name = document.createElement('span');
+        name.className = 'tone-check-name';
+        name.textContent = TONE_PRESETS[key].label;
+        const badge = document.createElement('span');
+        badge.className = 'tone-order-badge';
+        label.appendChild(cb);
+        label.appendChild(name);
+        label.appendChild(badge);
+        container.appendChild(label);
+    });
+    refreshToneCheckList(container);
+}
+
+/** 選択順バッジ（基調 / 2 / 3 …）とハイライトを貼り直す */
+function refreshToneCheckList(container) {
+    if (!container) return;
+    const order = container._order || [];
+    container.querySelectorAll('.tone-check').forEach(label => {
+        const cb = label.querySelector('input');
+        const badge = label.querySelector('.tone-order-badge');
+        const i = order.indexOf(cb.value);
+        cb.checked = i >= 0;
+        label.classList.toggle('checked', i >= 0);
+        badge.textContent = i < 0 ? '' : (i === 0 ? '基調' : String(i + 1));
     });
 }
 
-/** クエスト開始時に default_tone があれば初期トーンとして採用する */
+/** チェックリストの選択内容を差し替える（外部からの変更を UI に反映） */
+function setToneCheckList(container, keys) {
+    if (!container) return;
+    container._order = parseToneKeys((keys || []).join(','));
+    refreshToneCheckList(container);
+}
+
+/** チャット欄のトーンボタン表示とメニュー内サマリを現在値に合わせる */
+function updateToneButtonLabel() {
+    const keys = getToneKeys();
+    const btn = document.getElementById('tone-btn');
+    if (btn) {
+        btn.textContent = keys.length === 0 ? '🎭 トーン' : '🎭 ' + toneKeysToLabel(keys);
+        btn.classList.toggle('active', keys.length > 0);
+    }
+    const summary = document.getElementById('tone-menu-summary');
+    if (summary) summary.textContent = keys.length === 0 ? '指定なし' : toneKeysToLabel(keys);
+    setToneCheckList(document.getElementById('tone-menu-list'), keys);
+}
+
+function setupToneSelect() {
+    const picker = document.getElementById('tone-picker');
+    const btn = document.getElementById('tone-btn');
+    const menu = document.getElementById('tone-menu');
+    const list = document.getElementById('tone-menu-list');
+    if (!picker || !btn || !menu || !list || picker._bound) return;
+    picker._bound = true;
+
+    buildToneCheckList(list, getToneKeys(), (keys) => {
+        setToneKeys(keys);
+        if (keys.length === 0) {
+            showToast('🎭 トーン指定を解除しました');
+        } else if (keys.length === 1) {
+            showToast('🎭 トーン: ' + toneKeysToLabel(keys) + '（次の応答から反映）');
+        } else {
+            // 3つ以上は指示が競合しやすく破綻しがち。止めはしないが一声かける。
+            showToast('🎭 混合トーン: ' + toneKeysToLabel(keys) + '（基調=' + TONE_PRESETS[keys[0]].label + '）'
+                + (keys.length >= 3 ? ' ※混ぜすぎると破綻しやすくなります' : ''));
+        }
+        console.log('[Tone] プリセット変更:', toneMode);
+    });
+    updateToneButtonLabel();
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.hidden = !menu.hidden;
+    });
+    const clearBtn = document.getElementById('tone-clear-btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setToneKeys([]);
+            showToast('🎭 トーン指定を解除しました');
+        });
+    }
+    // メニュー外クリックで閉じる（内部クリックは維持）
+    menu.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => { menu.hidden = true; });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !menu.hidden) menu.hidden = true;
+    });
+}
+
+/** クエスト開始時に default_tone があれば初期トーンとして採用する（混合可） */
 function applyQuestDefaultTone(template) {
     if (!template || !template.default_tone) return;
-    const key = String(template.default_tone);
-    if (!TONE_PRESETS[key]) return;
-    toneMode = key;
-    localStorage.setItem('toneMode', toneMode);
-    const sel = document.getElementById('tone-select');
-    if (sel) {
-        sel.value = toneMode;
-        sel.classList.toggle('active', toneMode !== 'none');
-    }
-    console.log('[Tone] クエスト既定トーンを適用:', key);
+    const keys = parseToneKeys(template.default_tone);
+    if (keys.length === 0) return;
+    setToneKeys(keys);
+    console.log('[Tone] クエスト既定トーンを適用:', toneMode);
 }
 
 // ======== Response Length Preset (S / M / L) ========
