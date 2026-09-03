@@ -1,5 +1,5 @@
 import './style.css'
-import { parseChoicesTag, parseInfoTag, collapseRunawayRepetition, looksRunawayRepetition, parseImageTags } from './parsers.js'
+import { parseChoicesTag, parseInfoTag, collapseRunawayRepetition, looksRunawayRepetition, parseImageTags, recoverMissingSpeakerTags } from './parsers.js'
 import {
     isImageLibrarySupported, saveDirHandle, loadDirHandle, clearDirHandle, verifyPermission,
     pickImageFolder, scanImageFiles, getImageUrl, getImageDataUrl, revokeAllImageUrls,
@@ -6133,6 +6133,18 @@ function splitAndAppendCharMessages(fullReply, shouldSave, forcedIndex = -1, all
     // [MEMO: 〜] タグを最初に抽出（AI Memo へ追加 + 表示文からは除去）
     fullReply = parseAndStoreAiMemoTags(fullReply);
 
+    // 話者タグの復元。
+    // [SPEAKER: ナレーション] のあとキャラが喋っているのにタグを閉じ忘れる、という
+    // ローカルモデルのドリフトを補正する。ここで直しておけば表示・TTS だけでなく
+    // 履歴（＝次ターンのお手本）も正しい形になり、ドリフトが定着しにくくなる。
+    {
+        const recovered = recoverMissingSpeakerTags(fullReply, members.map(m => m.name));
+        if (recovered.inserted > 0) {
+            console.log('[RP Engine] 欠落した [SPEAKER:] タグを復元:', recovered.inserted, '件');
+            fullReply = recovered.text;
+        }
+    }
+
     // {img:tag} を抽出（本文からは常に除去し、有効時のみ描画後に画像バブルを挿入）
     // {img:tag} は本文に残したまま描画側へ渡す。
     // appendMessage がタグの位置で本文を分割し、そこに画像を挟み込む
@@ -7355,6 +7367,16 @@ async function fetchChatCompletion(mode) {
             + '地の文（ナレーション）やNPCの発言には:\n'
             + '[SPEAKER: ナレーション]\n'
             + '登場NPCの発言には [SPEAKER: NPC名] を使用してください。\n\n'
+            + '★重要: ナレーションは一時的な切り替えです。\n'
+            + 'ナレーションのあとにNPCが喋る場合は、必ず [SPEAKER: NPC名] を書き直してから続けてください。\n'
+            + 'タグを付けずにセリフを続けると、その発言がすべてナレーターの声として扱われてしまいます。\n\n'
+            + '例:\n'
+            + '[SPEAKER: ナレーション]\n'
+            + '扉が軋みながら開き、冷たい風が吹き込んだ。\n'
+            + '[SPEAKER: 老人]\n'
+            + '「……よう来なさった」\n'
+            + '[SPEAKER: ナレーション]\n'
+            + '遠くで鐘が鳴った。\n\n'
             + '### 絶対禁止事項 ###\n'
             + '- ' + userConfig.name + '（プレイヤー）のセリフ・行動・思考を絶対に生成しないでください。\n'
             + '- プレイヤーの代わりに返答を書くことは厳禁です。\n'
@@ -7366,6 +7388,25 @@ async function fetchChatCompletion(mode) {
             + (userConfig.mes_example ? 'Dialogue Style:\n' + userConfig.mes_example + '\n' : '');
     } else if (members.length === 1) {
         systemPrompt = 'Write the next response for the roleplay. You are playing the role of ' + members[0].name + '. Do not break character.\n'
+            // 話者タグの使い方をここで必ず教えること。
+            // ナレーションタグだけ教えて本人のタグを教えないと、モデルは一度ナレーションに
+            // 切り替えたあと戻る手段を持たず、以降すべてがナレーション扱いになる。
+            + '### 必須出力フォーマット ###\n'
+            + '話者が変わるたびに、必ず行頭で以下のタグを書いてから内容を続けてください:\n'
+            + '[SPEAKER: ' + members[0].name + ']  … ' + members[0].name + ' のセリフ・行動・心情\n'
+            + '[SPEAKER: ナレーション]  … 場面描写・状況説明・' + userConfig.name + 'の様子の客観描写\n\n'
+            + '★重要: ナレーションは一時的な切り替えです。\n'
+            + 'ナレーションのあとに ' + members[0].name + ' が再び喋る・動く場合は、必ず [SPEAKER: ' + members[0].name + '] を書き直してから続けてください。\n'
+            + 'タグを付けないままセリフを続けると、' + members[0].name + ' の発言がナレーターの声として扱われてしまいます。\n\n'
+            + '例:\n'
+            + '[SPEAKER: ナレーション]\n'
+            + '扉が軋みながら開き、冷たい風が吹き込んだ。\n'
+            + '[SPEAKER: ' + members[0].name + ']\n'
+            + '「……遅かったじゃない」\n'
+            + '[SPEAKER: ナレーション]\n'
+            + '遠くで鐘が鳴った。\n'
+            + '[SPEAKER: ' + members[0].name + ']\n'
+            + '「まあいいわ。入りなさいよ」\n\n'
             + '### ABSOLUTE RULE ###\n'
             + 'NEVER write dialogue, actions, or thoughts for ' + userConfig.name + ' (the player). Only the player decides what they say or do.\n'
             + 'If you absolutely must reference the player\'s reaction or movement, use [SPEAKER: ナレーション] for objective third-person description (e.g., "He stepped back in surprise"). NEVER use [SPEAKER: ' + userConfig.name + '].\n\n'
@@ -7390,17 +7431,36 @@ async function fetchChatCompletion(mode) {
             `[SPEAKER: ${m.name}]\n（${m.name}のセリフや行動をここに書く）`
         ).join('\n');
 
+        // ナレーション ⇄ キャラを往復する見本。
+        // 「ナレーションのあと必ずタグを開き直す」ことを実例で示さないと、
+        // モデルは一度ナレーションに入ったきり戻ってこない。
+        const _exA = members[0].name;
+        const _exB = (members[1] && members[1].name) || members[0].name;
+        const alternationExample =
+            '[SPEAKER: ナレーション]\n'
+            + '扉が軋みながら開き、冷たい風が吹き込んだ。\n'
+            + '[SPEAKER: ' + _exA + ']\n'
+            + '「……遅かったじゃない」\n'
+            + '[SPEAKER: ナレーション]\n'
+            + '遠くで鐘が鳴る。\n'
+            + '[SPEAKER: ' + _exB + ']\n'
+            + '「悪い悪い、道に迷ってな」\n';
+
         systemPrompt = 'あなたはゲームマスターとして、以下の複数キャラクターを演じてください: ' + names + '。\n'
             + '### 必須出力フォーマット ###\n'
             + '各キャラクターの発言・行動の前に、必ず以下の形式でスピーカータグを付けてください:\n'
             + '[SPEAKER: キャラクター名]\n'
             + '※キャラクター名は登録名をそのまま使ってください（英語に変換しないこと）。\n\n'
-            + '地の文（ナレーション）やNPCの発言には必ず以下のタグを使ってください:\n'
+            + '地の文（ナレーション）や、登録されていないシナリオNPCの発言には以下のタグを使ってください:\n'
             + '[SPEAKER: ナレーション]\n'
             + '（場面描写、状況説明、シナリオNPCの発言など）\n\n'
+            + '★重要: ナレーションは一時的な切り替えです。\n'
+            + 'ナレーションのあとに ' + names + ' の誰かが喋る・動く場合は、必ず [SPEAKER: 名前] を書き直してから続けてください。\n'
+            + '一度 [SPEAKER: ナレーション] を出したあと、タグを付けずにキャラクターのセリフを書き続けてはいけません。\n'
+            + '（タグを閉じ忘れると、そのキャラの発言がすべてナレーターの声として扱われてしまいます）\n\n'
             + '例:\n'
-            + '[SPEAKER: ナレーション]\n'
-            + '（場面の描写や、シナリオNPCのセリフをここに書く）\n'
+            + alternationExample + '\n'
+            + '各キャラクターのタグ:\n'
             + speakerExample + '\n\n'
             + (mode !== 'banter_player'
                 ? '### 絶対禁止事項 ###\n'

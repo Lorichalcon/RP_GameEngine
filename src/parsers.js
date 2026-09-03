@@ -118,3 +118,87 @@ export function parseInfoTag(content) {
     const cleanedContent = content.replace(regex, '').trim();
     return { infoText: infoText || null, cleanedContent };
 }
+
+/** 正規表現に埋め込むためのエスケープ */
+function escapeForRegex(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 話者マーカーのパターン群を作る。
+ * 先頭ほど強いパターンなので順序を変えないこと（**名前**: を 名前: より先に当てる必要がある）。
+ * いずれも「行頭」限定。マッチした部分はそのまま削れば表示用テキストになる
+ * （「名前「」形式だけは先読みで 「 を残す）。
+ */
+function buildSpeakerMarkerPatterns(name) {
+    const e = escapeForRegex(name);
+    return [
+        new RegExp('^[ \\t]*\\*\\*' + e + '\\*{0,2}[ \\t]*[：:][ \\t]*\\*{0,2}[ \\t]*'), // **名前**: / **名前:**
+        new RegExp('^[ \\t]*【' + e + '】[ \\t]*'),                                       // 【名前】
+        new RegExp('^[ \\t]*[―—]' + e + '[―—][ \\t]*'),                                  // ―名前―
+        new RegExp('^[ \\t]*' + e + '[ \\t]*[：:][ \\t]*'),                               // 名前: / 名前：
+        new RegExp('^[ \\t]*' + e + '[ \\t]*(?=[「『])')                                  // 名前「 / 名前『（括弧は残す）
+    ];
+}
+
+/**
+ * [SPEAKER: ナレーション] に切り替わったあと、キャラクターのセリフが続いても
+ * 話者タグが再開されない——というローカルモデル特有のドリフトを補正する。
+ * ナレーション扱いのまま残ると、そのブロック全体がナレーターの声・アイコンになってしまう。
+ *
+ * 行頭に「名前「」「名前:」「**名前**:」「【名前】」「―名前―」といった明示的な話者マーカーがあり、
+ * かつ現在の話者と違う場合にだけ [SPEAKER: 名前] を挿入し、マーカー自体は表示用に削る。
+ * 地の文へ埋め込まれた括弧だけのセリフ（例: 扉が開いた。「遅かったな」）は
+ * 誰の発言か確定できないため、あえて手を付けない。
+ *
+ * @param {string} text        AI応答（[SPEAKER:] タグを含むもの）
+ * @param {string[]} memberNames 登録済みキャラクター名
+ * @returns {{ text: string, inserted: number }}
+ */
+export function recoverMissingSpeakerTags(text, memberNames) {
+    if (!text || !Array.isArray(memberNames) || memberNames.length === 0) {
+        return { text: text || '', inserted: 0 };
+    }
+    // タグが1つも無い応答は既存の「名前プレフィックス」経路が担当するので触らない
+    if (!/\[SPEAKER:\s*[^\]]+\]/i.test(text)) return { text, inserted: 0 };
+
+    const markers = memberNames
+        .filter(n => n && String(n).trim())
+        .map(name => ({ name, patterns: buildSpeakerMarkerPatterns(name) }));
+    if (markers.length === 0) return { text, inserted: 0 };
+
+    const tagLineRegex = /^[ \t]*\[SPEAKER:\s*([^\]]+)\]/i;
+    const lines = text.split('\n');
+    const out = [];
+    let current = null;   // 最初のタグが出るまでは null（＝タグ前テキストには介入しない）
+    let inserted = 0;
+
+    for (const line of lines) {
+        const tagMatch = tagLineRegex.exec(line);
+        if (tagMatch) {
+            current = tagMatch[1].trim();
+            out.push(line);
+            continue;
+        }
+        if (current !== null && line.trim()) {
+            let hit = null;
+            let stripped = line;
+            for (const mk of markers) {
+                if (mk.name === current) continue; // 既にその話者のブロック内なら何もしない
+                const p = mk.patterns.find(re => re.test(line));
+                if (p) { hit = mk; stripped = line.replace(p, ''); break; }
+            }
+            if (hit && stripped.trim()) {
+                out.push('[SPEAKER: ' + hit.name + ']');
+                out.push(stripped);
+                current = hit.name;
+                inserted++;
+                continue;
+            }
+        }
+        out.push(line);
+    }
+
+    return { text: inserted > 0 ? out.join('\n') : text, inserted };
+}
+
